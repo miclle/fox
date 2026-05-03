@@ -7,6 +7,7 @@ It shows how to:
 - Generate OpenAPI 3.0.3 from registered Fox routes
 - Infer path, query, header, request body, and response schemas from handler signatures
 - Read handler and struct field comments with `openapi.Source(".")`
+- Add explicit operation metadata with `openapi.Operation(...)`
 - Map common `binding` rules into OpenAPI schema constraints
 - Serve `/openapi.yaml` and `/openapi.json`
 
@@ -68,6 +69,7 @@ The generated spec includes:
 - JSON request body fields from `json` tags
 - response schemas from handler return types
 - operation summaries and field descriptions from Go comments
+- operation tags and custom operation IDs from explicit metadata
 - default error response schemas for handlers returning `error`
 
 ## Notes

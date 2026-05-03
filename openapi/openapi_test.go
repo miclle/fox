@@ -297,6 +297,42 @@ func TestGenerateReadsHandlerAndFieldCommentsFromSource(t *testing.T) {
 	require.Equal(t, "Stable user identifier.", responseProps["id"].(map[string]any)["description"])
 }
 
+func TestGenerateAppliesExplicitOperationMetadata(t *testing.T) {
+	engine := fox.New()
+	engine.POST("/documented-users", createDocumentedUser)
+
+	g := openapi.New(engine,
+		openapi.Info("Fox Test API", "1.0.0"),
+		openapi.Source("./..."),
+		openapi.Operation("POST", "/documented-users",
+			openapi.Summary("Create user override"),
+			openapi.Description("Explicit operation description."),
+			openapi.OperationID("createUser"),
+			openapi.Tags("users", "admin"),
+			openapi.Response(201, documentedUserResponse{}, "Created"),
+		),
+	)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	op := spec["paths"].(map[string]any)["/documented-users"].(map[string]any)["post"].(map[string]any)
+	require.Equal(t, "Create user override", op["summary"])
+	require.Equal(t, "Explicit operation description.", op["description"])
+	require.Equal(t, "createUser", op["operationId"])
+	require.Equal(t, []any{"users", "admin"}, op["tags"])
+
+	responses := op["responses"].(map[string]any)
+	require.Contains(t, responses, "200")
+	created := responses["201"].(map[string]any)
+	require.Equal(t, "Created", created["description"])
+	schema := created["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	require.Equal(t, "#/components/schemas/fox_openapi_test_documentedUserResponse", schema["$ref"])
+}
+
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {
 	t.Helper()
 

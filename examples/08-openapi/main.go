@@ -68,6 +68,12 @@ func main() {
 		openapi.Info("Fox OpenAPI Example", "1.0.0"),
 		openapi.Server("http://localhost:"+port),
 		openapi.Source("."),
+		openapi.Operation("GET", "/users", openapi.Tags("users")),
+		openapi.Operation("GET", "/users/:id", openapi.Tags("users")),
+		openapi.Operation("POST", "/users",
+			openapi.OperationID("createUser"),
+			openapi.Tags("users"),
+		),
 	)
 
 	router.GET("/openapi.yaml", openapi.YAMLHandler(spec))

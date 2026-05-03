@@ -28,6 +28,7 @@ type Generator struct {
 	schemaNames map[reflect.Type]string
 	warnings    []string
 	docs        *commentDocs
+	operations  map[operationKey]operationDoc
 }
 
 // Info sets the OpenAPI info title and version.
@@ -53,6 +54,7 @@ func New(engine *fox.Engine, opts ...Option) *Generator {
 	g := &Generator{
 		engine:      engine,
 		schemaNames: make(map[reflect.Type]string),
+		operations:  make(map[operationKey]operationDoc),
 		spec: &openapi3.T{
 			OpenAPI:    "3.0.3",
 			Info:       &openapi3.Info{Title: "Fox API", Version: "0.0.0"},
@@ -121,6 +123,7 @@ func (g *Generator) generate() {
 		}
 		g.addMissingPathParams(op, route.Path)
 		g.addResponses(op, route.HandlerType)
+		g.applyOperationDoc(op, route.Method, route.Path)
 
 		g.spec.AddOperation(openAPIPath(route.Path), route.Method, op)
 	}

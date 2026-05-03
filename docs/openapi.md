@@ -64,6 +64,7 @@ spec := openapi.New(router,
 	openapi.Info("My API", "1.0.0"),
 	openapi.Server("https://api.example.com"),
 	openapi.Source("."),
+	openapi.Operation("GET", "/users/:id", openapi.Tags("users")),
 )
 
 	router.GET("/openapi.yaml", openapi.YAMLHandler(spec))
@@ -111,6 +112,26 @@ spec := openapi.New(router,
 The first paragraph of the handler comment becomes the operation summary. The
 full handler comment becomes the operation description. Struct field comments
 become schema property descriptions.
+
+## Explicit Operation Metadata
+
+Use `openapi.Operation` when comments are not enough:
+
+```go
+spec := openapi.New(router,
+	openapi.Info("My API", "1.0.0"),
+	openapi.Operation("POST", "/users",
+		openapi.Summary("Create user"),
+		openapi.Description("Creates a user from the JSON request body."),
+		openapi.OperationID("createUser"),
+		openapi.Tags("users"),
+		openapi.Response(201, UserResponse{}, "Created"),
+	),
+)
+```
+
+Explicit metadata wins over comment-derived metadata. Route paths use the same
+Fox syntax used during route registration, such as `/users/:id`.
 
 ## Write A YAML File
 
@@ -166,6 +187,7 @@ The MVP generates:
 - `info` from `openapi.Info(title, version)`
 - `servers` from `openapi.Server(url)`
 - operation summaries and descriptions from handler comments via `openapi.Source`
+- explicit operation metadata from `openapi.Operation`
 - `paths` and HTTP methods from registered fox routes
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
 - fallback path parameters from route placeholders when no matching `uri` tag exists
@@ -223,7 +245,6 @@ Supported validation constraints in the MVP:
 
 The current implementation intentionally does not generate:
 
-- Multiple explicit success status codes
 - Security schemes
 - Swagger UI / Scalar / Redoc assets
 - DomainEngine-specific multi-host specs

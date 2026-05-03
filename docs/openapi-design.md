@@ -17,7 +17,7 @@ Fox 框架以"约定优于配置"为核心，handler 通过反射自动绑定请
 
 1. 提供一个独立 Go module `github.com/fox-gonic/fox-openapi`，对任意 `*fox.Engine` 在运行期自动生成 OpenAPI 3.0.3 spec（可选升级到 3.1）
 2. 对现存 handler **零改造**即可获得基础 spec（路径、方法、参数、请求体、响应类型）
-3. 提供一套轻量元数据 API，按需补充 `summary`/`description`/`operationId`/`tags`/`security`/多状态码响应
+3. 提供一套轻量元数据 API，按需补充 `summary`/`description`/`operationId`/`tags`/多状态码响应；`security` 后续补齐
 4. 内置 spec 输出端点（`/openapi.yaml`、`/openapi.json`）
 5. 为后续 Swagger UI / Scalar / Redoc 和 `DomainEngine` 多域名场景预留扩展方向
 
@@ -253,7 +253,34 @@ type DocProvider interface {
 
 生成流程保持不变：`reflect` 生成基础结构，DocProvider 补充描述，manual override 最后兜底。因此后续不会推倒第一版，只是增加 metadata 来源。
 
-### 7.3 链式 Builder（Phase 2 草案）
+### 7.3 Operation 元数据（已部分实现）
+
+当前先用 `openapi.New` 的 option 注册显式元数据，不要求业务路由注册改成 wrapper：
+
+```go
+spec := openapi.New(engine,
+    openapi.Operation("POST", "/users",
+        openapi.Summary("Create user"),
+        openapi.Description("Creates a user from the JSON request body."),
+        openapi.OperationID("createUser"),
+        openapi.Tags("users"),
+        openapi.Response(201, User{}, "Created"),
+    ),
+)
+```
+
+已支持：
+
+- `Summary`
+- `Description`
+- `OperationID`
+- `Tags`
+- `Deprecated`
+- `Response`
+
+显式元数据优先级高于注释提取。
+
+### 7.4 链式 Builder（Phase 2+ 草案）
 
 `Handle` / `GET` / `POST` 等返回值保持 `gin.IRoutes` 兼容；元数据优先通过 `openapi.Route(...)` 辅助函数挂载到最近注册的路由，后续再评估是否引入 fox 自己的 route wrapper：
 
@@ -269,7 +296,7 @@ openapi.Route(router, "POST", "/users").
 
 不采用把 functional options 混入 `POST(...handlers)` 的形式，因为当前 `handlers ...HandlerFunc` 会把 option 当作 handler 校验，容易破坏现有 API 语义。
 
-### 7.4 Group 级元数据（Phase 2 草案）
+### 7.5 Group 级元数据（Phase 2 草案）
 
 ```go
 api := router.Group("/api/v1")
@@ -280,7 +307,7 @@ openapi.Group(api).
 
 实现：用 `*RouterGroup` 的指针作为 key，将 group meta merge 到所有该 group 注册的 operation。
 
-### 7.5 全局元数据
+### 7.6 全局元数据
 
 ```go
 spec := openapi.New(engine,
@@ -395,6 +422,14 @@ func New(engine *fox.Engine, opts ...Option) *Generator
 func Info(title, version string) Option
 func Server(url string) Option
 func Source(paths ...string) Option
+func Operation(method, path string, opts ...OperationOption) Option
+
+func Summary(value string) OperationOption
+func Description(value string) OperationOption
+func OperationID(value string) OperationOption
+func Tags(values ...string) OperationOption
+func Deprecated(value bool) OperationOption
+func Response(status int, body any, description string) OperationOption
 
 // Generator
 func (g *Generator) Spec() *openapi3.T
@@ -459,7 +494,8 @@ func (o *Op) Header(name, desc string, required bool) *Op
 ### Phase 2 — 完整元数据（约 2 天）
 
 - [ ] 扩展 `binding` tag → schema 约束映射，覆盖更多 validator 规则
-- [ ] Operation builder API（Summary / Tag / Response / Security）
+- [x] Operation option API（Summary / Description / OperationID / Tags / Deprecated / Response）
+- [ ] Security metadata API
 - [ ] Group 级元数据
 - [ ] `httperrors` 自动错误响应
 - [ ] `time.Time` 等特殊类型 formatter
