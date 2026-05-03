@@ -30,6 +30,7 @@ type Generator struct {
 	docs        *commentDocs
 	operations  map[operationKey]operationDoc
 	groups      []groupDoc
+	formatters  map[reflect.Type]*openapi3.Schema
 }
 
 // Info sets the OpenAPI info title and version.
@@ -56,6 +57,7 @@ func New(engine *fox.Engine, opts ...Option) *Generator {
 		engine:      engine,
 		schemaNames: make(map[reflect.Type]string),
 		operations:  make(map[operationKey]operationDoc),
+		formatters:  make(map[reflect.Type]*openapi3.Schema),
 		spec: &openapi3.T{
 			OpenAPI:    "3.0.3",
 			Info:       &openapi3.Info{Title: "Fox API", Version: "0.0.0"},
@@ -270,6 +272,9 @@ func (g *Generator) successResponse(typ reflect.Type) *openapi3.Response {
 
 func (g *Generator) schemaRef(typ reflect.Type) *openapi3.SchemaRef {
 	typ = deref(typ)
+	if schema, ok := g.formatters[typ]; ok {
+		return &openapi3.SchemaRef{Value: cloneSchema(schema)}
+	}
 	if typ.Kind() == reflect.Struct && typ != reflect.TypeOf(time.Time{}) {
 		return g.componentSchemaRef(typ)
 	}

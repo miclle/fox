@@ -177,6 +177,27 @@ spec := openapi.New(router,
 For OAuth2/OpenID Connect or custom schemes, pass a `*openapi3.SecurityScheme`
 directly to `openapi.SecurityScheme`.
 
+## Custom Type Formatters
+
+Use `RegisterFormatter` when a Go type should use a specific OpenAPI schema:
+
+```go
+type UserID string
+
+type UserResponse struct {
+	ID UserID `json:"id"`
+}
+
+spec := openapi.New(router,
+	openapi.RegisterFormatter(
+		reflect.TypeOf(UserID("")),
+		openapi3.NewStringSchema().WithFormat("uuid"),
+	),
+)
+```
+
+The registered schema is used wherever that Go type appears.
+
 ## Write A YAML File
 
 You can also write the generated spec to disk:
@@ -235,6 +256,7 @@ The MVP generates:
 - path-prefix metadata from `openapi.Group`
 - security schemes and operation security requirements
 - `/openapi.yaml` and `/openapi.json` handlers through `openapi.Mount`
+- custom type schema overrides through `openapi.RegisterFormatter`
 - `paths` and HTTP methods from registered fox routes
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
 - fallback path parameters from route placeholders when no matching `uri` tag exists

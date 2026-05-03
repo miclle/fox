@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
+	"github.com/getkin/kin-openapi/openapi3"
 	"github.com/stretchr/testify/require"
 
 	"github.com/fox-gonic/fox"
@@ -54,6 +56,12 @@ type documentedUserResponse struct {
 	ID int64 `json:"id"`
 }
 
+type customID string
+
+type customIDResponse struct {
+	ID customID `json:"id"`
+}
+
 func getUser(_ *fox.Context, _ getUserRequest) (userResponse, error) {
 	return userResponse{}, nil
 }
@@ -89,6 +97,10 @@ func getMismatchedURI(_ *fox.Context, _ mismatchedURIRequest) string {
 // Creates a user and returns the persisted representation.
 func createDocumentedUser(_ *fox.Context, _ documentedCreateUserRequest) documentedUserResponse {
 	return documentedUserResponse{}
+}
+
+func getCustomID(_ *fox.Context) customIDResponse {
+	return customIDResponse{}
 }
 
 func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
@@ -430,6 +442,28 @@ func TestGenerateAppliesGroupMetadataByPathPrefix(t *testing.T) {
 	postOp := spec["paths"].(map[string]any)["/api/users"].(map[string]any)["post"].(map[string]any)
 	require.Equal(t, []any{"users"}, postOp["tags"])
 	require.Equal(t, []any{map[string]any{"BearerAuth": []any{}}}, postOp["security"])
+}
+
+func TestGenerateUsesRegisteredFormatters(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/custom-id", getCustomID)
+
+	g := openapi.New(engine,
+		openapi.Info("Fox Test API", "1.0.0"),
+		openapi.RegisterFormatter(reflect.TypeOf(customID("")), openapi3.NewStringSchema().WithFormat("uuid")),
+	)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	schemaName := "fox_openapi_test_customIDResponse"
+	props := spec["components"].(map[string]any)["schemas"].(map[string]any)[schemaName].(map[string]any)["properties"].(map[string]any)
+	id := props["id"].(map[string]any)
+	require.Equal(t, "string", id["type"])
+	require.Equal(t, "uuid", id["format"])
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {
