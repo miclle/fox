@@ -13,6 +13,7 @@ This directory contains comprehensive examples demonstrating various features of
 | [05-custom-validator](05-custom-validator/) | Custom validation | IsValider interface, complex validation rules |
 | [06-error-handling](06-error-handling/) | Error handling | HTTP errors, custom errors, error codes |
 | [07-logger-config](07-logger-config/) | Logger configuration | Console/file logging, rotation, structured logs |
+| [08-openapi](08-openapi/) | OpenAPI generation | Generated OpenAPI YAML/JSON, schemas, validation constraints |
 
 ## Quick Start
 
@@ -141,12 +142,13 @@ func (sr *SignupRequest) IsValid() error {
 4. Study **03-middleware** for request processing
 5. Explore **05-custom-validator** for complex validation
 6. Configure **07-logger-config** for production logging
+7. Generate docs with **08-openapi**
 
 ### Advanced
 
-7. Implement **04-domain-routing** for multi-tenant apps
-8. Combine patterns from multiple examples
-9. Build your own production application
+8. Implement **04-domain-routing** for multi-tenant apps
+9. Combine patterns from multiple examples
+10. Build your own production application
 
 ## Prerequisites
 

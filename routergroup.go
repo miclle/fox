@@ -107,6 +107,7 @@ func (group *RouterGroup) Handle(httpMethod, relativePath string, handlers ...Ha
 
 	absolutePath := utils.JoinPaths(group.router.BasePath(), relativePath)
 	debugPrintRoute(group, httpMethod, absolutePath, handlers)
+	group.engine.registerOpenAPIRoute(httpMethod, absolutePath, handlers)
 	return group.router.Handle(httpMethod, relativePath, handlersChain...)
 }
 

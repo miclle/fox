@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"reflect"
+	"sync"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
@@ -103,6 +104,9 @@ type Engine struct {
 	DefaultRenderErrorStatusCode int
 
 	RenderErrorFunc RenderErrorFunc
+
+	openAPIRoutesMu sync.RWMutex
+	openAPIRoutes   map[openAPIRouteKey]OpenAPIRouteInfo
 }
 
 func init() {
