@@ -105,6 +105,7 @@ func (g *Generator) addInput(op *openapi3.Operation, typ reflect.Type) {
 
 	body := openapi3.NewObjectSchema()
 	body.Properties = openapi3.Schemas{}
+	bodyMediaType := "application/json"
 
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
@@ -128,7 +129,13 @@ func (g *Generator) addInput(op *openapi3.Operation, typ reflect.Type) {
 			continue
 		}
 
-		name := tagName(field, "json")
+		name := tagName(field, "form")
+		if name != "" {
+			bodyMediaType = "application/x-www-form-urlencoded"
+		}
+		if name == "" {
+			name = tagName(field, "json")
+		}
 		if name == "" {
 			name = lowerFirst(field.Name)
 		}
@@ -141,7 +148,7 @@ func (g *Generator) addInput(op *openapi3.Operation, typ reflect.Type) {
 	if len(body.Properties) > 0 {
 		op.RequestBody = &openapi3.RequestBodyRef{Value: openapi3.NewRequestBody().
 			WithRequired(len(body.Required) > 0).
-			WithJSONSchema(body)}
+			WithSchema(body, []string{bodyMediaType})}
 	}
 }
 

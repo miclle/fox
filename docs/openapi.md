@@ -103,6 +103,7 @@ The MVP generates:
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
 - `uri`, `query`, and `header` parameters from handler input structs
 - JSON request bodies from handler input struct fields
+- URL-encoded form request bodies from `form` tags
 - JSON response bodies from handler return values
 - `text/plain` response bodies for handlers that return `string`
 - Struct schemas under `components/schemas` with `$ref` reuse
@@ -129,6 +130,7 @@ Supported parameter location tags:
 | `query:"page"` | `parameters[in=query]` |
 | `header:"X-Token"` | `parameters[in=header]` |
 | `json:"name"` | request body property |
+| `form:"username"` | `application/x-www-form-urlencoded` request body property |
 | `context:"user"` | skipped |
 
 Supported validation constraints in the MVP:

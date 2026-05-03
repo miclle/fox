@@ -23,6 +23,11 @@ type createUserRequest struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
+type loginRequest struct {
+	Username string `form:"username" binding:"required"`
+	Password string `form:"password" binding:"required,min=8"`
+}
+
 type userResponse struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
@@ -49,6 +54,10 @@ func getTree(_ *fox.Context) treeNode {
 
 func ping(_ *fox.Context) string {
 	return "pong"
+}
+
+func login(_ *fox.Context, _ loginRequest) string {
+	return "ok"
 }
 
 func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
@@ -159,6 +168,31 @@ func TestGenerateDocumentsStringResponsesAsTextPlain(t *testing.T) {
 	require.Contains(t, content, "text/plain")
 	require.NotContains(t, content, "application/json")
 	require.Equal(t, "string", content["text/plain"].(map[string]any)["schema"].(map[string]any)["type"])
+}
+
+func TestGenerateDocumentsFormRequestBodies(t *testing.T) {
+	engine := fox.New()
+	engine.POST("/login", login)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	loginOp := spec["paths"].(map[string]any)["/login"].(map[string]any)["post"].(map[string]any)
+	content := loginOp["requestBody"].(map[string]any)["content"].(map[string]any)
+	require.Contains(t, content, "application/x-www-form-urlencoded")
+	require.NotContains(t, content, "application/json")
+
+	schema := content["application/x-www-form-urlencoded"].(map[string]any)["schema"].(map[string]any)
+	require.Contains(t, schema["required"], "username")
+	require.Contains(t, schema["required"], "password")
+	props := schema["properties"].(map[string]any)
+	require.Equal(t, "string", props["username"].(map[string]any)["type"])
+	require.Equal(t, float64(8), props["password"].(map[string]any)["minLength"])
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {
