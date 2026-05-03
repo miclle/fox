@@ -2,10 +2,12 @@ package openapi
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"reflect"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +24,7 @@ type Generator struct {
 	engine      *fox.Engine
 	spec        *openapi3.T
 	schemaNames map[reflect.Type]string
+	warnings    []string
 }
 
 func Info(title, version string) Option {
@@ -65,6 +68,14 @@ func (g *Generator) Spec() *openapi3.T {
 	return g.spec
 }
 
+func (g *Generator) Warnings() []string {
+	return append([]string(nil), g.warnings...)
+}
+
+func (g *Generator) warnf(format string, args ...any) {
+	g.warnings = append(g.warnings, fmt.Sprintf(format, args...))
+}
+
 func (g *Generator) JSON() ([]byte, error) {
 	return json.MarshalIndent(g.spec, "", "  ")
 }
@@ -89,7 +100,7 @@ func (g *Generator) generate() {
 		op.Responses = openapi3.NewResponses()
 
 		if route.HandlerType.NumIn() == 2 {
-			g.addInput(op, route.HandlerType.In(1))
+			g.addInput(op, route, route.HandlerType.In(1))
 		}
 		g.addResponses(op, route.HandlerType)
 
@@ -97,7 +108,7 @@ func (g *Generator) generate() {
 	}
 }
 
-func (g *Generator) addInput(op *openapi3.Operation, typ reflect.Type) {
+func (g *Generator) addInput(op *openapi3.Operation, route fox.OpenAPIRouteInfo, typ reflect.Type) {
 	typ = deref(typ)
 	if typ.Kind() != reflect.Struct {
 		return
@@ -106,6 +117,7 @@ func (g *Generator) addInput(op *openapi3.Operation, typ reflect.Type) {
 	body := openapi3.NewObjectSchema()
 	body.Properties = openapi3.Schemas{}
 	bodyMediaType := "application/json"
+	pathParams := pathParamNames(route.Path)
 
 	for i := 0; i < typ.NumField(); i++ {
 		field := typ.Field(i)
@@ -114,6 +126,9 @@ func (g *Generator) addInput(op *openapi3.Operation, typ reflect.Type) {
 		}
 
 		if name := tagName(field, "uri"); name != "" {
+			if _, ok := pathParams[name]; !ok {
+				g.warnf(`%s %s: uri parameter %q does not match path parameters %s`, route.Method, route.Path, name, formatParamNames(pathParams))
+			}
 			op.AddParameter(g.parameter(name, "path", true, field))
 			continue
 		}
@@ -341,6 +356,24 @@ var pathParamPattern = regexp.MustCompile(`[:*]([A-Za-z0-9_]+)`)
 
 func openAPIPath(path string) string {
 	return pathParamPattern.ReplaceAllString(path, `{$1}`)
+}
+
+func pathParamNames(path string) map[string]struct{} {
+	matches := pathParamPattern.FindAllStringSubmatch(path, -1)
+	names := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		names[match[1]] = struct{}{}
+	}
+	return names
+}
+
+func formatParamNames(params map[string]struct{}) string {
+	names := make([]string, 0, len(params))
+	for name := range params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return "[" + strings.Join(names, " ") + "]"
 }
 
 func tagName(field reflect.StructField, key string) string {

@@ -92,6 +92,29 @@ yamlData, err := spec.YAML()
 jsonData, err := spec.JSON()
 ```
 
+## Check Warnings
+
+Generation is best-effort. Non-fatal issues are collected as warnings:
+
+```go
+for _, warning := range spec.Warnings() {
+	log.Println(warning)
+}
+```
+
+For example, Fox warns when a `uri` tag does not match the registered path:
+
+```go
+router.GET("/users/:id", getUser)
+
+type GetUserRequest struct {
+	UserID int64 `uri:"user_id"`
+}
+```
+
+The path contains `:id`, but the struct asks Fox to bind `user_id`, so the
+generated OpenAPI path parameter would not match the actual route placeholder.
+
 ## What Is Generated
 
 The MVP generates:
@@ -102,6 +125,7 @@ The MVP generates:
 - `paths` and HTTP methods from registered fox routes
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
 - `uri`, `query`, and `header` parameters from handler input structs
+- warnings for `uri` tags that do not match registered path parameters
 - JSON request bodies from handler input struct fields
 - URL-encoded form request bodies from `form` tags
 - JSON response bodies from handler return values

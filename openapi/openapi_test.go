@@ -28,6 +28,10 @@ type loginRequest struct {
 	Password string `form:"password" binding:"required,min=8"`
 }
 
+type mismatchedURIRequest struct {
+	UserID int64 `uri:"user_id" binding:"required"`
+}
+
 type userResponse struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
@@ -57,6 +61,10 @@ func ping(_ *fox.Context) string {
 }
 
 func login(_ *fox.Context, _ loginRequest) string {
+	return "ok"
+}
+
+func getMismatchedURI(_ *fox.Context, _ mismatchedURIRequest) string {
 	return "ok"
 }
 
@@ -193,6 +201,15 @@ func TestGenerateDocumentsFormRequestBodies(t *testing.T) {
 	props := schema["properties"].(map[string]any)
 	require.Equal(t, "string", props["username"].(map[string]any)["type"])
 	require.Equal(t, float64(8), props["password"].(map[string]any)["minLength"])
+}
+
+func TestGenerateWarnsWhenURIParamDoesNotMatchPath(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/users/:id", getMismatchedURI)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+
+	require.Contains(t, g.Warnings(), `GET /users/:id: uri parameter "user_id" does not match path parameters [id]`)
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {
