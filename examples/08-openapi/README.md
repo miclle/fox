@@ -6,6 +6,7 @@ It shows how to:
 
 - Generate OpenAPI 3.0.3 from registered Fox routes
 - Infer path, query, header, request body, and response schemas from handler signatures
+- Read handler and struct field comments with `openapi.Source(".")`
 - Map common `binding` rules into OpenAPI schema constraints
 - Serve `/openapi.yaml` and `/openapi.json`
 
@@ -66,12 +67,10 @@ The generated spec includes:
 - path parameters from `uri` tags
 - JSON request body fields from `json` tags
 - response schemas from handler return types
+- operation summaries and field descriptions from Go comments
 - default error response schemas for handlers returning `error`
 
 ## Notes
-
-This MVP does not read Go comments for summaries or field descriptions yet.
-Those descriptions are planned for a later comment-based metadata provider.
 
 The example is its own Go module and imports `github.com/fox-gonic/fox-openapi`.
 During monorepo development, `go.mod` points that import path to `../../openapi`

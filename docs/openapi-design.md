@@ -1,6 +1,6 @@
 # Fox OpenAPI 自动生成 — 设计文档
 
-> 状态：Phase 1 MVP 已实现，Phase 2+ 草案
+> 状态：Phase 2 注释提取已部分实现，Phase 2+ 持续推进
 > 版本：v0.3
 > 日期：2026-05-04
 
@@ -23,7 +23,7 @@ Fox 框架以"约定优于配置"为核心，handler 通过反射自动绑定请
 
 **非目标**：
 
-- MVP 不做基于源代码注释的解析；后续通过可选 `CommentDocProvider` 做 dev-time AST 增强，不走 `swag` 注释 DSL 路线
+- 不走 `swag` 注释 DSL 路线；注释提取只读取普通 Go doc comment
 - 不做 OpenAPI 2.0 (Swagger) 兼容
 - 不替代用户手写 spec 的能力（用户始终可以提供 override）
 - 不解决 RPC、GraphQL、gRPC-Gateway 场景
@@ -75,7 +75,8 @@ fox/
 ├── route_registry.go   // fox core: HandlerRoutes / RouteInfo，仅暴露轻量元信息
 └── openapi/
     ├── go.mod          // module github.com/fox-gonic/fox-openapi
-    ├── openapi.go      // MVP 主入口：New / Spec / YAML / JSON / WriteYAML / Warnings
+    ├── openapi.go      // 主入口：New / Spec / YAML / JSON / WriteYAML / Warnings
+    ├── comments.go     // Source option + Go comment extraction
     ├── handler.go      // YAMLHandler / JSONHandler
     └── openapi_test.go
 ```
@@ -220,9 +221,28 @@ func (engine *Engine) HandlerRoutes() []RouteInfo
 
 ## 7. 元数据 API
 
-### 7.1 DocProvider 分层
+### 7.1 Source 注释提取
 
-第一版先实现结构生成层。反射负责回答“有什么”；DocProvider 作为扩展点预留，后续负责回答“它是什么意思”。
+`openapi.Source(paths ...string)` 已实现最小注释提取，反射负责回答“有什么”，源码注释负责补充“它是什么意思”。
+
+```go
+spec := openapi.New(engine,
+    openapi.Info("My API", "1.0.0"),
+    openapi.Source("./..."),
+)
+```
+
+当前支持：
+
+- handler 函数注释第一段 → operation `summary`
+- handler 函数完整注释 → operation `description`
+- request / response struct 字段注释 → schema property `description`
+
+当前实现基于标准库 `go/parser`，可读取普通 `.go` 文件和 `*_test.go` 文件。后续若需要更强的 module/package 解析能力，再升级为 `go/packages`。
+
+### 7.2 DocProvider 分层（Phase 2+ 草案）
+
+后续可把已实现的 `Source` 注释索引器抽象成 DocProvider，并与 manual override 分层合并：
 
 ```go
 type DocProvider interface {
@@ -231,14 +251,9 @@ type DocProvider interface {
 }
 ```
 
-MVP 只预留接口，不读取 `doc` / `description` 等额外业务 tag。第二版新增：
+生成流程保持不变：`reflect` 生成基础结构，DocProvider 补充描述，manual override 最后兜底。因此后续不会推倒第一版，只是增加 metadata 来源。
 
-- `CommentDocProvider`：通过 `go/packages` / AST 读取 handler 函数注释与 struct 字段注释
-- `ManualDocProvider`：读取 builder API 显式补充的 metadata
-
-生成流程保持不变：`reflect` 生成基础结构，DocProvider 补充描述，manual override 最后兜底。因此第二版不会推倒第一版，只是增加 metadata 来源。
-
-### 7.2 链式 Builder（Phase 2 草案）
+### 7.3 链式 Builder（Phase 2 草案）
 
 `Handle` / `GET` / `POST` 等返回值保持 `gin.IRoutes` 兼容；元数据优先通过 `openapi.Route(...)` 辅助函数挂载到最近注册的路由，后续再评估是否引入 fox 自己的 route wrapper：
 
@@ -254,7 +269,7 @@ openapi.Route(router, "POST", "/users").
 
 不采用把 functional options 混入 `POST(...handlers)` 的形式，因为当前 `handlers ...HandlerFunc` 会把 option 当作 handler 校验，容易破坏现有 API 语义。
 
-### 7.3 Group 级元数据（Phase 2 草案）
+### 7.4 Group 级元数据（Phase 2 草案）
 
 ```go
 api := router.Group("/api/v1")
@@ -265,7 +280,7 @@ openapi.Group(api).
 
 实现：用 `*RouterGroup` 的指针作为 key，将 group meta merge 到所有该 group 注册的 operation。
 
-### 7.4 全局元数据
+### 7.5 全局元数据
 
 ```go
 spec := openapi.New(engine,
@@ -379,6 +394,7 @@ func New(engine *fox.Engine, opts ...Option) *Generator
 // Option 风格的配置
 func Info(title, version string) Option
 func Server(url string) Option
+func Source(paths ...string) Option
 
 // Generator
 func (g *Generator) Spec() *openapi3.T
@@ -447,7 +463,8 @@ func (o *Op) Header(name, desc string, required bool) *Op
 - [ ] Group 级元数据
 - [ ] `httperrors` 自动错误响应
 - [ ] `time.Time` 等特殊类型 formatter
-- [ ] `CommentDocProvider`：读取 handler 函数注释和 struct 字段注释
+- [x] `Source`：读取 handler 函数注释和 struct 字段注释
+- [ ] 抽象 `DocProvider`：为 manual override 和更强源码解析预留统一层
 
 ### Phase 3 — UI 与多域名（约 1-2 天）
 

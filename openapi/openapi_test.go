@@ -44,6 +44,16 @@ type treeNode struct {
 	Children []treeNode `json:"children"`
 }
 
+type documentedCreateUserRequest struct {
+	// Display name for the new user.
+	Name string `json:"name" binding:"required"`
+}
+
+type documentedUserResponse struct {
+	// Stable user identifier.
+	ID int64 `json:"id"`
+}
+
 func getUser(_ *fox.Context, _ getUserRequest) (userResponse, error) {
 	return userResponse{}, nil
 }
@@ -72,6 +82,13 @@ func login(_ *fox.Context, _ loginRequest) string {
 
 func getMismatchedURI(_ *fox.Context, _ mismatchedURIRequest) string {
 	return "ok"
+}
+
+// Create documented user.
+//
+// Creates a user and returns the persisted representation.
+func createDocumentedUser(_ *fox.Context, _ documentedCreateUserRequest) documentedUserResponse {
+	return documentedUserResponse{}
 }
 
 func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
@@ -250,6 +267,34 @@ func TestGenerateDocumentsNoReturnHandlersWithEmptyOKResponse(t *testing.T) {
 	response := noopOp["responses"].(map[string]any)["200"].(map[string]any)
 	require.Equal(t, "OK", response["description"])
 	require.NotContains(t, response, "content")
+}
+
+func TestGenerateReadsHandlerAndFieldCommentsFromSource(t *testing.T) {
+	engine := fox.New()
+	engine.POST("/documented-users", createDocumentedUser)
+
+	g := openapi.New(engine,
+		openapi.Info("Fox Test API", "1.0.0"),
+		openapi.Source("./..."),
+	)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	op := spec["paths"].(map[string]any)["/documented-users"].(map[string]any)["post"].(map[string]any)
+	require.Equal(t, "Create documented user.", op["summary"])
+	require.Equal(t, "Create documented user.\n\nCreates a user and returns the persisted representation.", op["description"])
+
+	requestSchema := op["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	requestProps := requestSchema["properties"].(map[string]any)
+	require.Equal(t, "Display name for the new user.", requestProps["name"].(map[string]any)["description"])
+
+	responseSchemaName := "fox_openapi_test_documentedUserResponse"
+	responseProps := spec["components"].(map[string]any)["schemas"].(map[string]any)[responseSchemaName].(map[string]any)["properties"].(map[string]any)
+	require.Equal(t, "Stable user identifier.", responseProps["id"].(map[string]any)["description"])
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {

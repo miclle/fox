@@ -5,9 +5,9 @@ signatures. The current implementation is an MVP focused on structural API
 documentation: paths, methods, parameters, request bodies, response bodies, and
 common validation constraints.
 
-It does not read handler comments or field comments yet. Comment-based
-descriptions are planned as a later `CommentDocProvider` layer, so this first
-version does not require `doc` tags or a separate code generation step.
+It can also read regular Go comments from source files to fill operation
+summaries, operation descriptions, and schema field descriptions. It does not
+require `doc` tags or a separate code generation step.
 
 ## Install
 
@@ -60,10 +60,11 @@ func main() {
 
 	router.GET("/users/:id", getUser)
 
-	spec := openapi.New(router,
-		openapi.Info("My API", "1.0.0"),
-		openapi.Server("https://api.example.com"),
-	)
+spec := openapi.New(router,
+	openapi.Info("My API", "1.0.0"),
+	openapi.Server("https://api.example.com"),
+	openapi.Source("."),
+)
 
 	router.GET("/openapi.yaml", openapi.YAMLHandler(spec))
 	router.GET("/openapi.json", openapi.JSONHandler(spec))
@@ -78,6 +79,38 @@ Then fetch the generated spec:
 curl http://localhost:8080/openapi.yaml
 curl http://localhost:8080/openapi.json
 ```
+
+## Source Comments
+
+Use `openapi.Source` to add descriptions from regular Go comments:
+
+```go
+type CreateUserRequest struct {
+	// Display name for the new user.
+	Name string `json:"name" binding:"required"`
+}
+
+type UserResponse struct {
+	// Stable user identifier.
+	ID int64 `json:"id"`
+}
+
+// Create user.
+//
+// Creates a user and returns the persisted representation.
+func createUser(ctx *fox.Context, req CreateUserRequest) (UserResponse, error) {
+	return UserResponse{}, nil
+}
+
+spec := openapi.New(router,
+	openapi.Info("My API", "1.0.0"),
+	openapi.Source("./..."),
+)
+```
+
+The first paragraph of the handler comment becomes the operation summary. The
+full handler comment becomes the operation description. Struct field comments
+become schema property descriptions.
 
 ## Write A YAML File
 
@@ -132,12 +165,14 @@ The MVP generates:
 - OpenAPI version `3.0.3`
 - `info` from `openapi.Info(title, version)`
 - `servers` from `openapi.Server(url)`
+- operation summaries and descriptions from handler comments via `openapi.Source`
 - `paths` and HTTP methods from registered fox routes
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
 - fallback path parameters from route placeholders when no matching `uri` tag exists
 - `uri`, `query`, and `header` parameters from handler input structs
 - warnings for `uri` tags that do not match registered path parameters
 - JSON request bodies from handler input struct fields
+- request and response field descriptions from struct comments via `openapi.Source`
 - URL-encoded form request bodies from `form` tags
 - JSON response bodies from handler return values
 - `text/plain` response bodies for handlers that return `string`
@@ -186,10 +221,8 @@ Supported validation constraints in the MVP:
 
 ## Current Limitations
 
-The MVP intentionally does not generate:
+The current implementation intentionally does not generate:
 
-- Interface summaries or descriptions from handler comments
-- Field descriptions from struct field comments
 - Multiple explicit success status codes
 - Security schemes
 - Swagger UI / Scalar / Redoc assets
@@ -197,5 +230,5 @@ The MVP intentionally does not generate:
 - Custom schema naming overrides
 
 Those are planned as follow-up phases. The current generator is designed so
-comment parsing and manual overrides can be added as metadata providers without
-replacing the route and schema generation core.
+manual overrides can be added as metadata providers without replacing the route
+and schema generation core.

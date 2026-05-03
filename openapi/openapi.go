@@ -27,6 +27,7 @@ type Generator struct {
 	spec        *openapi3.T
 	schemaNames map[reflect.Type]string
 	warnings    []string
+	docs        *commentDocs
 }
 
 // Info sets the OpenAPI info title and version.
@@ -108,6 +109,12 @@ func (g *Generator) generate() {
 		op := openapi3.NewOperation()
 		op.OperationID = operationID(route)
 		op.Responses = openapi3.NewResponses()
+		if g.docs != nil {
+			if text := g.docs.funcDoc(route.HandlerName); text != "" {
+				op.Summary = firstParagraph(text)
+				op.Description = text
+			}
+		}
 
 		if route.HandlerType.NumIn() == 2 {
 			g.addInput(op, route, route.HandlerType.In(1))
@@ -166,15 +173,15 @@ func (g *Generator) addInput(op *openapi3.Operation, route fox.RouteInfo, typ re
 			if _, ok := pathParams[name]; !ok {
 				g.warnf(`%s %s: uri parameter %q does not match path parameters %s`, route.Method, route.Path, name, formatParamNames(pathParams))
 			}
-			op.AddParameter(g.parameter(name, "path", true, field))
+			op.AddParameter(g.parameter(name, "path", true, typ, field))
 			continue
 		}
 		if name := tagName(field, "query"); name != "" {
-			op.AddParameter(g.parameter(name, "query", hasBinding(field, "required"), field))
+			op.AddParameter(g.parameter(name, "query", hasBinding(field, "required"), typ, field))
 			continue
 		}
 		if name := tagName(field, "header"); name != "" {
-			op.AddParameter(g.parameter(name, "header", hasBinding(field, "required"), field))
+			op.AddParameter(g.parameter(name, "header", hasBinding(field, "required"), typ, field))
 			continue
 		}
 		if tagName(field, "context") != "" {
@@ -191,7 +198,7 @@ func (g *Generator) addInput(op *openapi3.Operation, route fox.RouteInfo, typ re
 		if name == "" {
 			name = lowerFirst(field.Name)
 		}
-		body.Properties[name] = g.fieldSchemaRef(field)
+		body.Properties[name] = g.fieldSchemaRefForType(typ, field)
 		if hasBinding(field, "required") {
 			body.Required = append(body.Required, name)
 		}
@@ -204,19 +211,28 @@ func (g *Generator) addInput(op *openapi3.Operation, route fox.RouteInfo, typ re
 	}
 }
 
-func (g *Generator) parameter(name, in string, required bool, field reflect.StructField) *openapi3.Parameter {
+func (g *Generator) parameter(name, in string, required bool, owner reflect.Type, field reflect.StructField) *openapi3.Parameter {
 	return &openapi3.Parameter{
 		Name:     name,
 		In:       in,
 		Required: required,
-		Schema:   g.fieldSchemaRef(field),
+		Schema:   g.fieldSchemaRefForType(owner, field),
 	}
 }
 
 func (g *Generator) fieldSchemaRef(field reflect.StructField) *openapi3.SchemaRef {
+	return g.fieldSchemaRefForType(nil, field)
+}
+
+func (g *Generator) fieldSchemaRefForType(owner reflect.Type, field reflect.StructField) *openapi3.SchemaRef {
 	ref := g.schemaRef(field.Type)
 	if ref.Value != nil {
 		applyBinding(ref.Value, field)
+		if owner != nil {
+			if text := g.docs.fieldDoc(deref(owner).Name(), field.Name); text != "" {
+				ref.Value.Description = text
+			}
+		}
 	}
 	return ref
 }
@@ -344,7 +360,7 @@ func (g *Generator) objectSchema(typ reflect.Type) *openapi3.Schema {
 		if name == "" {
 			name = lowerFirst(field.Name)
 		}
-		schema.Properties[name] = g.fieldSchemaRef(field)
+		schema.Properties[name] = g.fieldSchemaRefForType(typ, field)
 		if hasBinding(field, "required") {
 			schema.Required = append(schema.Required, name)
 		}
