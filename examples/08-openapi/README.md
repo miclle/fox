@@ -8,6 +8,7 @@ It shows how to:
 - Infer path, query, header, request body, and response schemas from handler signatures
 - Read handler and struct field comments with `openapi.Source(".")`
 - Add explicit operation metadata with `openapi.Operation(...)`
+- Apply shared metadata by path prefix with `openapi.Group(...)`
 - Register bearer auth metadata with `openapi.SecurityScheme(...)`
 - Map common `binding` rules into OpenAPI schema constraints
 - Serve `/openapi.yaml` and `/openapi.json` with `openapi.Mount(...)`

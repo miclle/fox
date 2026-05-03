@@ -399,6 +399,39 @@ func TestGenerateAppliesSecuritySchemes(t *testing.T) {
 	require.Equal(t, []any{map[string]any{"BearerAuth": []any{}}}, op["security"])
 }
 
+func TestGenerateAppliesGroupMetadataByPathPrefix(t *testing.T) {
+	engine := fox.New()
+	api := engine.Group("/api")
+	api.GET("/users/:id", getUser)
+	api.POST("/users", createUser)
+
+	g := openapi.New(engine,
+		openapi.Info("Fox Test API", "1.0.0"),
+		openapi.SecurityScheme("BearerAuth", openapi.HTTPBearerSecurity("JWT bearer token")),
+		openapi.Group("/api",
+			openapi.Tags("api"),
+			openapi.Security("BearerAuth"),
+		),
+		openapi.Operation("POST", "/api/users",
+			openapi.Tags("users"),
+		),
+	)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	getOp := spec["paths"].(map[string]any)["/api/users/{id}"].(map[string]any)["get"].(map[string]any)
+	require.Equal(t, []any{"api"}, getOp["tags"])
+	require.Equal(t, []any{map[string]any{"BearerAuth": []any{}}}, getOp["security"])
+
+	postOp := spec["paths"].(map[string]any)["/api/users"].(map[string]any)["post"].(map[string]any)
+	require.Equal(t, []any{"users"}, postOp["tags"])
+	require.Equal(t, []any{map[string]any{"BearerAuth": []any{}}}, postOp["security"])
+}
+
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {
 	t.Helper()
 

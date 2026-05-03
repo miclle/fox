@@ -142,6 +142,24 @@ spec := openapi.New(router,
 Explicit metadata wins over comment-derived metadata. Route paths use the same
 Fox syntax used during route registration, such as `/users/:id`.
 
+Use `openapi.Group` to apply metadata to every route under a path prefix:
+
+```go
+spec := openapi.New(router,
+	openapi.Group("/api",
+		openapi.Tags("api"),
+		openapi.Security("BearerAuth"),
+	),
+	openapi.Operation("POST", "/api/users",
+		openapi.Tags("users"),
+	),
+)
+```
+
+Operation metadata wins over group metadata for fields such as tags, while
+group-level security is inherited when the operation does not set its own
+security requirements.
+
 ## Security
 
 Register security schemes globally, then attach them to operations:
@@ -214,6 +232,7 @@ The MVP generates:
 - `servers` from `openapi.Server(url)`
 - operation summaries and descriptions from handler comments via `openapi.Source`
 - explicit operation metadata from `openapi.Operation`
+- path-prefix metadata from `openapi.Group`
 - security schemes and operation security requirements
 - `/openapi.yaml` and `/openapi.json` handlers through `openapi.Mount`
 - `paths` and HTTP methods from registered fox routes

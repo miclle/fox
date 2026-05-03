@@ -259,6 +259,10 @@ type DocProvider interface {
 
 ```go
 spec := openapi.New(engine,
+    openapi.Group("/api",
+        openapi.Tags("api"),
+        openapi.Security("BearerAuth"),
+    ),
     openapi.Operation("POST", "/users",
         openapi.Summary("Create user"),
         openapi.Description("Creates a user from the JSON request body."),
@@ -278,6 +282,7 @@ spec := openapi.New(engine,
 - `Deprecated`
 - `Response`
 - `Security`
+- `Group` prefix metadata
 
 显式元数据优先级高于注释提取。
 
@@ -297,16 +302,18 @@ openapi.Route(router, "POST", "/users").
 
 不采用把 functional options 混入 `POST(...handlers)` 的形式，因为当前 `handlers ...HandlerFunc` 会把 option 当作 handler 校验，容易破坏现有 API 语义。
 
-### 7.5 Group 级元数据（Phase 2 草案）
+### 7.5 Group 级元数据（已实现）
 
 ```go
-api := router.Group("/api/v1")
-openapi.Group(api).
-    Tag("users").
-    Security("BearerAuth")
+spec := openapi.New(engine,
+    openapi.Group("/api/v1",
+        openapi.Tags("users"),
+        openapi.Security("BearerAuth"),
+    ),
+)
 ```
 
-实现：用 `*RouterGroup` 的指针作为 key，将 group meta merge 到所有该 group 注册的 operation。
+由于 `fox-openapi` 是独立 module，不依赖 `RouterGroup` 内部未导出的 base path；当前实现使用路径前缀匹配，将 group meta merge 到所有匹配该前缀的 operation。单路由 `Operation` 元数据优先级高于 `Group`。
 
 ### 7.6 全局元数据
 
@@ -431,6 +438,7 @@ func Info(title, version string) Option
 func Server(url string) Option
 func Source(paths ...string) Option
 func Operation(method, path string, opts ...OperationOption) Option
+func Group(prefix string, opts ...OperationOption) Option
 
 func Summary(value string) OperationOption
 func Description(value string) OperationOption
@@ -509,7 +517,7 @@ func (o *Op) Header(name, desc string, required bool) *Op
 - [ ] 扩展 `binding` tag → schema 约束映射，覆盖更多 validator 规则
 - [x] Operation option API（Summary / Description / OperationID / Tags / Deprecated / Response）
 - [x] Security metadata API
-- [ ] Group 级元数据
+- [x] Group 级元数据
 - [ ] `httperrors` 自动错误响应
 - [ ] `time.Time` 等特殊类型 formatter
 - [x] `Source`：读取 handler 函数注释和 struct 字段注释

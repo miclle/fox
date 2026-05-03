@@ -69,14 +69,12 @@ func main() {
 		openapi.Server("http://localhost:"+port),
 		openapi.Source("."),
 		openapi.SecurityScheme("BearerAuth", openapi.HTTPBearerSecurity("JWT bearer token")),
-		openapi.Operation("GET", "/users", openapi.Tags("users")),
+		openapi.Group("/users", openapi.Tags("users")),
 		openapi.Operation("GET", "/users/:id",
-			openapi.Tags("users"),
 			openapi.Security("BearerAuth"),
 		),
 		openapi.Operation("POST", "/users",
 			openapi.OperationID("createUser"),
-			openapi.Tags("users"),
 		),
 	)
 

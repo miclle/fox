@@ -24,6 +24,11 @@ type operationDoc struct {
 	Security    openapi3.SecurityRequirements
 }
 
+type groupDoc struct {
+	Prefix string
+	Doc    operationDoc
+}
+
 type responseDoc struct {
 	Body        any
 	Description string
@@ -37,6 +42,17 @@ func Operation(method, path string, opts ...OperationOption) Option {
 			opt(&doc)
 		}
 		g.operations[operationKey{Method: strings.ToUpper(method), Path: path}] = doc
+	}
+}
+
+// Group adds metadata to operations whose Fox route path starts with prefix.
+func Group(prefix string, opts ...OperationOption) Option {
+	return func(g *Generator) {
+		doc := operationDoc{}
+		for _, opt := range opts {
+			opt(&doc)
+		}
+		g.groups = append(g.groups, groupDoc{Prefix: prefix, Doc: doc})
 	}
 }
 
@@ -99,10 +115,24 @@ func Security(name string, scopes ...string) OperationOption {
 }
 
 func (g *Generator) applyOperationDoc(op *openapi3.Operation, routeMethod, routePath string) {
+	g.applyGroupDocs(op, routePath)
+
 	doc, ok := g.operations[operationKey{Method: strings.ToUpper(routeMethod), Path: routePath}]
 	if !ok {
 		return
 	}
+	g.applyDoc(op, doc)
+}
+
+func (g *Generator) applyGroupDocs(op *openapi3.Operation, routePath string) {
+	for _, group := range g.groups {
+		if group.Prefix == "" || routePath == group.Prefix || strings.HasPrefix(routePath, strings.TrimRight(group.Prefix, "/")+"/") {
+			g.applyDoc(op, group.Doc)
+		}
+	}
+}
+
+func (g *Generator) applyDoc(op *openapi3.Operation, doc operationDoc) {
 	if doc.Summary != "" {
 		op.Summary = doc.Summary
 	}

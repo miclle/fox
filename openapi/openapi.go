@@ -29,6 +29,7 @@ type Generator struct {
 	warnings    []string
 	docs        *commentDocs
 	operations  map[operationKey]operationDoc
+	groups      []groupDoc
 }
 
 // Info sets the OpenAPI info title and version.
