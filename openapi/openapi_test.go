@@ -60,6 +60,10 @@ func ping(_ *fox.Context) string {
 	return "pong"
 }
 
+func getItem(_ *fox.Context) string {
+	return "item"
+}
+
 func login(_ *fox.Context, _ loginRequest) string {
 	return "ok"
 }
@@ -210,6 +214,22 @@ func TestGenerateWarnsWhenURIParamDoesNotMatchPath(t *testing.T) {
 	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
 
 	require.Contains(t, g.Warnings(), `GET /users/:id: uri parameter "user_id" does not match path parameters [id]`)
+}
+
+func TestGenerateDocumentsRoutePathParamsWithoutInputStruct(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/items/:id", getItem)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	itemOp := spec["paths"].(map[string]any)["/items/{id}"].(map[string]any)["get"].(map[string]any)
+	requireParameter(t, itemOp["parameters"].([]any), "id", "path", true, "string")
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {

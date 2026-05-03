@@ -102,10 +102,37 @@ func (g *Generator) generate() {
 		if route.HandlerType.NumIn() == 2 {
 			g.addInput(op, route, route.HandlerType.In(1))
 		}
+		g.addMissingPathParams(op, route.Path)
 		g.addResponses(op, route.HandlerType)
 
 		g.spec.AddOperation(openAPIPath(route.Path), route.Method, op)
 	}
+}
+
+func (g *Generator) addMissingPathParams(op *openapi3.Operation, path string) {
+	for name := range pathParamNames(path) {
+		if hasParameter(op, name, "path") {
+			continue
+		}
+		op.AddParameter(&openapi3.Parameter{
+			Name:     name,
+			In:       "path",
+			Required: true,
+			Schema:   &openapi3.SchemaRef{Value: openapi3.NewStringSchema()},
+		})
+	}
+}
+
+func hasParameter(op *openapi3.Operation, name, in string) bool {
+	for _, ref := range op.Parameters {
+		if ref == nil || ref.Value == nil {
+			continue
+		}
+		if ref.Value.Name == name && ref.Value.In == in {
+			return true
+		}
+	}
+	return false
 }
 
 func (g *Generator) addInput(op *openapi3.Operation, route fox.OpenAPIRouteInfo, typ reflect.Type) {

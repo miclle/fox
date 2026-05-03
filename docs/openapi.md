@@ -124,6 +124,7 @@ The MVP generates:
 - `servers` from `openapi.Server(url)`
 - `paths` and HTTP methods from registered fox routes
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
+- fallback path parameters from route placeholders when no matching `uri` tag exists
 - `uri`, `query`, and `header` parameters from handler input structs
 - warnings for `uri` tags that do not match registered path parameters
 - JSON request bodies from handler input struct fields
