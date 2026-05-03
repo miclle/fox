@@ -21,6 +21,7 @@ type operationDoc struct {
 	Tags        []string
 	Deprecated  *bool
 	Responses   map[int]responseDoc
+	Security    openapi3.SecurityRequirements
 }
 
 type responseDoc struct {
@@ -87,6 +88,16 @@ func Response(status int, body any, description string) OperationOption {
 	}
 }
 
+// Security adds a security requirement to the operation.
+func Security(name string, scopes ...string) OperationOption {
+	return func(doc *operationDoc) {
+		if scopes == nil {
+			scopes = []string{}
+		}
+		doc.Security = append(doc.Security, openapi3.SecurityRequirement{name: scopes})
+	}
+}
+
 func (g *Generator) applyOperationDoc(op *openapi3.Operation, routeMethod, routePath string) {
 	doc, ok := g.operations[operationKey{Method: strings.ToUpper(routeMethod), Path: routePath}]
 	if !ok {
@@ -106,6 +117,9 @@ func (g *Generator) applyOperationDoc(op *openapi3.Operation, routeMethod, route
 	}
 	if doc.Deprecated != nil {
 		op.Deprecated = *doc.Deprecated
+	}
+	if len(doc.Security) > 0 {
+		op.Security = &doc.Security
 	}
 	for status, response := range doc.Responses {
 		op.Responses.Set(strconv.Itoa(status), g.explicitResponse(status, response))

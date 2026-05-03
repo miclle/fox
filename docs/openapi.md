@@ -133,6 +133,23 @@ spec := openapi.New(router,
 Explicit metadata wins over comment-derived metadata. Route paths use the same
 Fox syntax used during route registration, such as `/users/:id`.
 
+## Security
+
+Register security schemes globally, then attach them to operations:
+
+```go
+spec := openapi.New(router,
+	openapi.SecurityScheme("BearerAuth", openapi.HTTPBearerSecurity("JWT bearer token")),
+	openapi.Operation("GET", "/users/:id",
+		openapi.Tags("users"),
+		openapi.Security("BearerAuth"),
+	),
+)
+```
+
+For OAuth2/OpenID Connect or custom schemes, pass a `*openapi3.SecurityScheme`
+directly to `openapi.SecurityScheme`.
+
 ## Write A YAML File
 
 You can also write the generated spec to disk:
@@ -188,6 +205,7 @@ The MVP generates:
 - `servers` from `openapi.Server(url)`
 - operation summaries and descriptions from handler comments via `openapi.Source`
 - explicit operation metadata from `openapi.Operation`
+- security schemes and operation security requirements
 - `paths` and HTTP methods from registered fox routes
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
 - fallback path parameters from route placeholders when no matching `uri` tag exists
@@ -245,7 +263,6 @@ Supported validation constraints in the MVP:
 
 The current implementation intentionally does not generate:
 
-- Security schemes
 - Swagger UI / Scalar / Redoc assets
 - DomainEngine-specific multi-host specs
 - Custom schema naming overrides

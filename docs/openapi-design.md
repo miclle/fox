@@ -17,7 +17,7 @@ Fox 框架以"约定优于配置"为核心，handler 通过反射自动绑定请
 
 1. 提供一个独立 Go module `github.com/fox-gonic/fox-openapi`，对任意 `*fox.Engine` 在运行期自动生成 OpenAPI 3.0.3 spec（可选升级到 3.1）
 2. 对现存 handler **零改造**即可获得基础 spec（路径、方法、参数、请求体、响应类型）
-3. 提供一套轻量元数据 API，按需补充 `summary`/`description`/`operationId`/`tags`/多状态码响应；`security` 后续补齐
+3. 提供一套轻量元数据 API，按需补充 `summary`/`description`/`operationId`/`tags`/`security`/多状态码响应
 4. 内置 spec 输出端点（`/openapi.yaml`、`/openapi.json`）
 5. 为后续 Swagger UI / Scalar / Redoc 和 `DomainEngine` 多域名场景预留扩展方向
 
@@ -277,6 +277,7 @@ spec := openapi.New(engine,
 - `Tags`
 - `Deprecated`
 - `Response`
+- `Security`
 
 显式元数据优先级高于注释提取。
 
@@ -317,6 +318,15 @@ spec := openapi.New(engine,
 ```
 
 `SecurityScheme` 等安全声明属于 Phase 2 元数据 API。
+
+安全声明已支持：
+
+```go
+spec := openapi.New(engine,
+    openapi.SecurityScheme("BearerAuth", openapi.HTTPBearerSecurity("JWT bearer token")),
+    openapi.Operation("GET", "/users/:id", openapi.Security("BearerAuth")),
+)
+```
 
 ## 8. 响应与错误模型
 
@@ -430,6 +440,9 @@ func OperationID(value string) OperationOption
 func Tags(values ...string) OperationOption
 func Deprecated(value bool) OperationOption
 func Response(status int, body any, description string) OperationOption
+func Security(name string, scopes ...string) OperationOption
+func SecurityScheme(name string, scheme *openapi3.SecurityScheme) Option
+func HTTPBearerSecurity(description string) *openapi3.SecurityScheme
 
 // Generator
 func (g *Generator) Spec() *openapi3.T
@@ -495,7 +508,7 @@ func (o *Op) Header(name, desc string, required bool) *Op
 
 - [ ] 扩展 `binding` tag → schema 约束映射，覆盖更多 validator 规则
 - [x] Operation option API（Summary / Description / OperationID / Tags / Deprecated / Response）
-- [ ] Security metadata API
+- [x] Security metadata API
 - [ ] Group 级元数据
 - [ ] `httperrors` 自动错误响应
 - [ ] `time.Time` 等特殊类型 formatter

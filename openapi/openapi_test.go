@@ -333,6 +333,35 @@ func TestGenerateAppliesExplicitOperationMetadata(t *testing.T) {
 	require.Equal(t, "#/components/schemas/fox_openapi_test_documentedUserResponse", schema["$ref"])
 }
 
+func TestGenerateAppliesSecuritySchemes(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/users/:id", getUser)
+
+	g := openapi.New(engine,
+		openapi.Info("Fox Test API", "1.0.0"),
+		openapi.SecurityScheme("BearerAuth", openapi.HTTPBearerSecurity("JWT bearer token")),
+		openapi.Operation("GET", "/users/:id",
+			openapi.Security("BearerAuth"),
+		),
+	)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	schemes := spec["components"].(map[string]any)["securitySchemes"].(map[string]any)
+	bearer := schemes["BearerAuth"].(map[string]any)
+	require.Equal(t, "http", bearer["type"])
+	require.Equal(t, "bearer", bearer["scheme"])
+	require.Equal(t, "JWT", bearer["bearerFormat"])
+	require.Equal(t, "JWT bearer token", bearer["description"])
+
+	op := spec["paths"].(map[string]any)["/users/{id}"].(map[string]any)["get"].(map[string]any)
+	require.Equal(t, []any{map[string]any{"BearerAuth": []any{}}}, op["security"])
+}
+
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {
 	t.Helper()
 
