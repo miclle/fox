@@ -10,7 +10,7 @@ It shows how to:
 - Add explicit operation metadata with `openapi.Operation(...)`
 - Register bearer auth metadata with `openapi.SecurityScheme(...)`
 - Map common `binding` rules into OpenAPI schema constraints
-- Serve `/openapi.yaml` and `/openapi.json`
+- Serve `/openapi.yaml` and `/openapi.json` with `openapi.Mount(...)`
 
 ## Run
 

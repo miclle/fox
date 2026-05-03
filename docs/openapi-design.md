@@ -393,11 +393,17 @@ paths:
 
 ## 10. UI 集成
 
-MVP 已提供 spec 输出 handler：
+已提供 spec 输出 handler 与一键挂载：
 
 ```go
 router.GET("/openapi.yaml",  openapi.YAMLHandler(spec))
 router.GET("/openapi.json",  openapi.JSONHandler(spec))
+
+openapi.Mount(router, spec)
+openapi.Mount(router, spec,
+    openapi.MountYAML("/docs/openapi.yaml"),
+    openapi.MountJSON("/docs/openapi.json"),
+)
 ```
 
 Phase 3 可增加 Swagger UI / Scalar / Redoc：
@@ -408,15 +414,7 @@ router.GET("/scalar",        openapi.Scalar("/openapi.yaml"))
 router.GET("/redoc",         openapi.Redoc("/openapi.yaml"))
 ```
 
-或一键挂载：
-
-```go
-openapi.Mount(router, openapi.MountOptions{
-    SpecPath: "/openapi.yaml",
-    UIPath:   "/docs",
-    UI:       openapi.UISwagger, // or UIScalar / UIRedoc
-})
-```
+后续 UI 挂载会复用 `Mount` 的 spec endpoint 配置。
 
 ## 11. 公开 API
 
@@ -443,6 +441,9 @@ func Response(status int, body any, description string) OperationOption
 func Security(name string, scopes ...string) OperationOption
 func SecurityScheme(name string, scheme *openapi3.SecurityScheme) Option
 func HTTPBearerSecurity(description string) *openapi3.SecurityScheme
+func Mount(engine *fox.Engine, g *Generator, opts ...MountOption)
+func MountYAML(path string) MountOption
+func MountJSON(path string) MountOption
 
 // Generator
 func (g *Generator) Spec() *openapi3.T
@@ -462,7 +463,6 @@ func JSONHandler(g *Generator) fox.HandlerFunc
 func SecurityScheme(name string, scheme *openapi3.SecurityScheme) Option
 func SetErrorSchema(t any) Option
 func RegisterFormatter(typ reflect.Type, schema *openapi3.Schema) Option
-func (g *Generator) Mount(opts MountOptions)
 
 // Operation 元数据 API
 type Op struct {
@@ -518,7 +518,7 @@ func (o *Op) Header(name, desc string, required bool) *Op
 ### Phase 3 — UI 与多域名（约 1-2 天）
 
 - [ ] Swagger UI / Scalar / Redoc embed
-- [ ] `Mount` 一键挂载
+- [x] `Mount` 一键挂载 spec endpoints
 - [ ] `DomainEngine` 多域名支持
 - [x] 文档与最佳实践
 

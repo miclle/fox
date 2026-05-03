@@ -60,15 +60,14 @@ func main() {
 
 	router.GET("/users/:id", getUser)
 
-spec := openapi.New(router,
-	openapi.Info("My API", "1.0.0"),
-	openapi.Server("https://api.example.com"),
-	openapi.Source("."),
-	openapi.Operation("GET", "/users/:id", openapi.Tags("users")),
-)
+	spec := openapi.New(router,
+		openapi.Info("My API", "1.0.0"),
+		openapi.Server("https://api.example.com"),
+		openapi.Source("."),
+		openapi.Operation("GET", "/users/:id", openapi.Tags("users")),
+	)
 
-	router.GET("/openapi.yaml", openapi.YAMLHandler(spec))
-	router.GET("/openapi.json", openapi.JSONHandler(spec))
+	openapi.Mount(router, spec)
 
 	router.Run(":8080")
 }
@@ -79,6 +78,16 @@ Then fetch the generated spec:
 ```bash
 curl http://localhost:8080/openapi.yaml
 curl http://localhost:8080/openapi.json
+```
+
+By default, `openapi.Mount` registers `/openapi.yaml` and `/openapi.json`.
+Use custom paths when needed:
+
+```go
+openapi.Mount(router, spec,
+	openapi.MountYAML("/docs/openapi.yaml"),
+	openapi.MountJSON("/docs/openapi.json"),
+)
 ```
 
 ## Source Comments
@@ -206,6 +215,7 @@ The MVP generates:
 - operation summaries and descriptions from handler comments via `openapi.Source`
 - explicit operation metadata from `openapi.Operation`
 - security schemes and operation security requirements
+- `/openapi.yaml` and `/openapi.json` handlers through `openapi.Mount`
 - `paths` and HTTP methods from registered fox routes
 - Gin-style path parameters such as `/users/:id` as `/users/{id}`
 - fallback path parameters from route placeholders when no matching `uri` tag exists

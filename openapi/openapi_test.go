@@ -164,6 +164,43 @@ func TestHandlersServeGeneratedSpec(t *testing.T) {
 	require.Contains(t, yamlRecorder.Body.String(), "/users/{id}:")
 }
 
+func TestMountRegistersGeneratedSpecHandlers(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/users/:id", getUser)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+	openapi.Mount(engine, g)
+
+	jsonRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(jsonRecorder, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	require.Equal(t, http.StatusOK, jsonRecorder.Code)
+	require.Contains(t, jsonRecorder.Body.String(), `"/users/{id}"`)
+
+	yamlRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(yamlRecorder, httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil))
+	require.Equal(t, http.StatusOK, yamlRecorder.Code)
+	require.Contains(t, yamlRecorder.Body.String(), "/users/{id}:")
+}
+
+func TestMountCanUseCustomPaths(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/users/:id", getUser)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+	openapi.Mount(engine, g,
+		openapi.MountYAML("/docs/spec.yaml"),
+		openapi.MountJSON("/docs/spec.json"),
+	)
+
+	jsonRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(jsonRecorder, httptest.NewRequest(http.MethodGet, "/docs/spec.json", nil))
+	require.Equal(t, http.StatusOK, jsonRecorder.Code)
+
+	yamlRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(yamlRecorder, httptest.NewRequest(http.MethodGet, "/docs/spec.yaml", nil))
+	require.Equal(t, http.StatusOK, yamlRecorder.Code)
+}
+
 func TestGenerateSupportsRecursiveStructSchemas(t *testing.T) {
 	engine := fox.New()
 	engine.GET("/tree", getTree)

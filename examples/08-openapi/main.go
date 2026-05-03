@@ -80,8 +80,7 @@ func main() {
 		),
 	)
 
-	router.GET("/openapi.yaml", openapi.YAMLHandler(spec))
-	router.GET("/openapi.json", openapi.JSONHandler(spec))
+	openapi.Mount(router, spec)
 
 	router.Run(":" + port)
 }
