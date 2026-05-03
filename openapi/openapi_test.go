@@ -62,6 +62,10 @@ type customIDResponse struct {
 	ID customID `json:"id"`
 }
 
+type customErrorResponse struct {
+	Message string `json:"message"`
+}
+
 func getUser(_ *fox.Context, _ getUserRequest) (userResponse, error) {
 	return userResponse{}, nil
 }
@@ -464,6 +468,29 @@ func TestGenerateUsesRegisteredFormatters(t *testing.T) {
 	id := props["id"].(map[string]any)
 	require.Equal(t, "string", id["type"])
 	require.Equal(t, "uuid", id["format"])
+}
+
+func TestGenerateUsesCustomErrorSchema(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/users/:id", getUser)
+
+	g := openapi.New(engine,
+		openapi.Info("Fox Test API", "1.0.0"),
+		openapi.SetErrorSchema(customErrorResponse{}),
+	)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	response := spec["components"].(map[string]any)["responses"].(map[string]any)["HTTPError"].(map[string]any)
+	schema := response["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	require.Equal(t, "#/components/schemas/fox_openapi_test_customErrorResponse", schema["$ref"])
+
+	components := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	require.Contains(t, components, "fox_openapi_test_customErrorResponse")
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {

@@ -31,6 +31,7 @@ type Generator struct {
 	operations  map[operationKey]operationDoc
 	groups      []groupDoc
 	formatters  map[reflect.Type]*openapi3.Schema
+	errorSchema reflect.Type
 }
 
 // Info sets the OpenAPI info title and version.
@@ -379,6 +380,15 @@ func (g *Generator) objectSchema(typ reflect.Type) *openapi3.Schema {
 }
 
 func (g *Generator) addHTTPErrorSchema() {
+	if g.errorSchema != nil {
+		g.spec.Components.Responses = openapi3.ResponseBodies{
+			"HTTPError": &openapi3.ResponseRef{Value: openapi3.NewResponse().
+				WithDescription("Error response").
+				WithJSONSchemaRef(g.schemaRef(g.errorSchema))},
+		}
+		return
+	}
+
 	g.spec.Components.Schemas["HTTPError"] = &openapi3.SchemaRef{Value: openapi3.NewObjectSchema().
 		WithProperty("code", openapi3.NewStringSchema()).
 		WithProperty("error", openapi3.NewStringSchema()).

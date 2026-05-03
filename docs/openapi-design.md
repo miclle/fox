@@ -284,6 +284,7 @@ spec := openapi.New(engine,
 - `Security`
 - `Group` prefix metadata
 - `RegisterFormatter`
+- `SetErrorSchema`
 
 显式元数据优先级高于注释提取。
 
@@ -454,6 +455,7 @@ func Mount(engine *fox.Engine, g *Generator, opts ...MountOption)
 func MountYAML(path string) MountOption
 func MountJSON(path string) MountOption
 func RegisterFormatter(typ reflect.Type, schema *openapi3.Schema) Option
+func SetErrorSchema(body any) Option
 
 // Generator
 func (g *Generator) Spec() *openapi3.T
@@ -519,7 +521,8 @@ func (o *Op) Header(name, desc string, required bool) *Op
 - [x] Operation option API（Summary / Description / OperationID / Tags / Deprecated / Response）
 - [x] Security metadata API
 - [x] Group 级元数据
-- [ ] `httperrors` 自动错误响应
+- [x] `httperrors` 自动错误响应
+- [x] 自定义错误响应 schema
 - [x] 自定义类型 formatter 注册
 - [x] `Source`：读取 handler 函数注释和 struct 字段注释
 - [ ] 抽象 `DocProvider`：为 manual override 和更强源码解析预留统一层

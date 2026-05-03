@@ -198,6 +198,21 @@ spec := openapi.New(router,
 
 The registered schema is used wherever that Go type appears.
 
+## Custom Error Schema
+
+Handlers returning `error` get a default `components.responses.HTTPError`
+response. Override its schema when your app has a custom error renderer:
+
+```go
+type ErrorResponse struct {
+	Message string `json:"message"`
+}
+
+spec := openapi.New(router,
+	openapi.SetErrorSchema(ErrorResponse{}),
+)
+```
+
 ## Write A YAML File
 
 You can also write the generated spec to disk:
@@ -272,6 +287,7 @@ The MVP generates:
 - Recursive and self-referential structs through component `$ref`s
 - Default error responses for handlers that return `error`
 - A reusable `HTTPError` schema based on `httperrors.Error`
+- Custom default error schemas through `openapi.SetErrorSchema`
 
 ## Supported Tags
 
