@@ -537,7 +537,7 @@ func (o *Op) Header(name, desc string, required bool) *Op
 ### Phase 4 — 优化与扩展（按需）
 
 - [ ] OpenAPI 3.1 webhooks
-- [ ] 自定义类型 formatter 注册（如 `decimal.Decimal`）
+- [x] 自定义类型 formatter 注册（如 `decimal.Decimal`）
 - [ ] `oneOf` / `anyOf` 支持（接口类型显式声明）
 - [ ] Spec diff 工具（CI 中检测破坏性变更）
 
