@@ -16,6 +16,12 @@ cd examples/08-openapi
 go run main.go
 ```
 
+Use a different port if `8080` is already occupied:
+
+```bash
+PORT=18080 go run main.go
+```
+
 ## Try The API
 
 List users:

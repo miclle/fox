@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/fox-gonic/fox"
@@ -41,6 +42,11 @@ var users = []User{
 }
 
 func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
 	router := fox.Default()
 
 	router.GET("/users", listUsers)
@@ -49,13 +55,13 @@ func main() {
 
 	spec := openapi.New(router,
 		openapi.Info("Fox OpenAPI Example", "1.0.0"),
-		openapi.Server("http://localhost:8080"),
+		openapi.Server("http://localhost:"+port),
 	)
 
 	router.GET("/openapi.yaml", openapi.YAMLHandler(spec))
 	router.GET("/openapi.json", openapi.JSONHandler(spec))
 
-	router.Run(":8080")
+	router.Run(":" + port)
 }
 
 func listUsers(_ *fox.Context, req ListUsersRequest) ListUsersResponse {
