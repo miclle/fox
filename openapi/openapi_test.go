@@ -47,6 +47,10 @@ func getTree(_ *fox.Context) treeNode {
 	return treeNode{}
 }
 
+func ping(_ *fox.Context) string {
+	return "pong"
+}
+
 func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
 	engine := fox.New()
 	engine.GET("/users/:id", getUser)
@@ -136,6 +140,25 @@ func TestGenerateSupportsRecursiveStructSchemas(t *testing.T) {
 	props := treeSchema["properties"].(map[string]any)
 	require.Equal(t, "#/components/schemas/openapi_test_treeNode", props["parent"].(map[string]any)["$ref"])
 	require.Equal(t, "#/components/schemas/openapi_test_treeNode", props["children"].(map[string]any)["items"].(map[string]any)["$ref"])
+}
+
+func TestGenerateDocumentsStringResponsesAsTextPlain(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/ping", ping)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	pingOp := spec["paths"].(map[string]any)["/ping"].(map[string]any)["get"].(map[string]any)
+	content := pingOp["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)
+	require.Contains(t, content, "text/plain")
+	require.NotContains(t, content, "application/json")
+	require.Equal(t, "string", content["text/plain"].(map[string]any)["schema"].(map[string]any)["type"])
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {

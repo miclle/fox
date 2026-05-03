@@ -169,14 +169,22 @@ func (g *Generator) addResponses(op *openapi3.Operation, typ reflect.Type) {
 
 	firstOut := typ.Out(0)
 	if !isError(firstOut) {
-		op.Responses.Set("200", &openapi3.ResponseRef{Value: openapi3.NewResponse().
-			WithDescription(http.StatusText(http.StatusOK)).
-			WithJSONSchemaRef(g.schemaRef(firstOut))})
+		op.Responses.Set("200", &openapi3.ResponseRef{Value: g.successResponse(firstOut)})
 	}
 
 	if typ.NumOut() == 2 || isError(firstOut) {
 		op.Responses.Set("default", &openapi3.ResponseRef{Ref: "#/components/responses/HTTPError"})
 	}
+}
+
+func (g *Generator) successResponse(typ reflect.Type) *openapi3.Response {
+	response := openapi3.NewResponse().WithDescription(http.StatusText(http.StatusOK))
+	if deref(typ).Kind() == reflect.String {
+		return response.WithContent(openapi3.Content{
+			"text/plain": openapi3.NewMediaType().WithSchemaRef(g.schemaRef(typ)),
+		})
+	}
+	return response.WithJSONSchemaRef(g.schemaRef(typ))
 }
 
 func (g *Generator) schemaRef(typ reflect.Type) *openapi3.SchemaRef {
