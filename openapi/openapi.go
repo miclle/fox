@@ -19,8 +19,9 @@ import (
 type Option func(*Generator)
 
 type Generator struct {
-	engine *fox.Engine
-	spec   *openapi3.T
+	engine      *fox.Engine
+	spec        *openapi3.T
+	schemaNames map[reflect.Type]string
 }
 
 func Info(title, version string) Option {
@@ -41,7 +42,8 @@ func New(engine *fox.Engine, opts ...Option) *Generator {
 	components.Schemas = openapi3.Schemas{}
 
 	g := &Generator{
-		engine: engine,
+		engine:      engine,
+		schemaNames: make(map[reflect.Type]string),
 		spec: &openapi3.T{
 			OpenAPI:    "3.0.3",
 			Info:       &openapi3.Info{Title: "Fox API", Version: "0.0.0"},
@@ -176,8 +178,28 @@ func (g *Generator) addResponses(op *openapi3.Operation, typ reflect.Type) {
 }
 
 func (g *Generator) schemaRef(typ reflect.Type) *openapi3.SchemaRef {
+	typ = deref(typ)
+	if typ.Kind() == reflect.Struct && typ != reflect.TypeOf(time.Time{}) {
+		return g.componentSchemaRef(typ)
+	}
 	schema := g.schema(typ)
 	return &openapi3.SchemaRef{Value: schema}
+}
+
+func (g *Generator) componentSchemaRef(typ reflect.Type) *openapi3.SchemaRef {
+	if name, ok := g.schemaNames[typ]; ok {
+		return &openapi3.SchemaRef{Ref: "#/components/schemas/" + name}
+	}
+
+	name := schemaName(typ)
+	g.schemaNames[typ] = name
+
+	if _, exists := g.spec.Components.Schemas[name]; !exists {
+		g.spec.Components.Schemas[name] = &openapi3.SchemaRef{Value: openapi3.NewObjectSchema()}
+		g.spec.Components.Schemas[name] = &openapi3.SchemaRef{Value: g.objectSchema(typ)}
+	}
+
+	return &openapi3.SchemaRef{Ref: "#/components/schemas/" + name}
 }
 
 func (g *Generator) schema(typ reflect.Type) *openapi3.Schema {
@@ -280,6 +302,22 @@ func operationID(route fox.OpenAPIRouteInfo) string {
 	}
 	replacer := strings.NewReplacer("/", "_", ".", "_", "-", "_", ":", "_", "*", "_")
 	return strings.Trim(replacer.Replace(route.HandlerName), "_")
+}
+
+func schemaName(typ reflect.Type) string {
+	pkg := typ.PkgPath()
+	if idx := strings.LastIndex(pkg, "/"); idx >= 0 {
+		pkg = pkg[idx+1:]
+	}
+	if pkg == "" {
+		return typ.Name()
+	}
+	return sanitizeName(pkg + "_" + typ.Name())
+}
+
+func sanitizeName(value string) string {
+	replacer := strings.NewReplacer("/", "_", ".", "_", "-", "_", ":", "_", "*", "_")
+	return strings.Trim(replacer.Replace(value), "_")
 }
 
 var pathParamPattern = regexp.MustCompile(`[:*]([A-Za-z0-9_]+)`)

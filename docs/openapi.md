@@ -104,6 +104,7 @@ The MVP generates:
 - `uri`, `query`, and `header` parameters from handler input structs
 - JSON request bodies from handler input struct fields
 - JSON response bodies from handler return values
+- Struct schemas under `components/schemas` with `$ref` reuse
 - Default error responses for handlers that return `error`
 - A reusable `HTTPError` schema based on `httperrors.Error`
 
@@ -153,7 +154,7 @@ The MVP intentionally does not generate:
 - Security schemes
 - Swagger UI / Scalar / Redoc assets
 - DomainEngine-specific multi-host specs
-- Component schema deduplication with `$ref` for all structs
+- Custom schema naming overrides
 
 Those are planned as follow-up phases. The current generator is designed so
 comment parsing and manual overrides can be added as metadata providers without

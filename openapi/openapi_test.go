@@ -69,6 +69,8 @@ func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
 	responses := getOp["responses"].(map[string]any)
 	require.Contains(t, responses, "200")
 	require.Contains(t, responses, "default")
+	responseSchema := responses["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
+	require.Equal(t, "#/components/schemas/openapi_test_userResponse", responseSchema["$ref"])
 
 	postOp := paths["/users"].(map[string]any)["post"].(map[string]any)
 	bodySchema := postOp["requestBody"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)
@@ -80,6 +82,11 @@ func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
 	require.Equal(t, float64(3), props["name"].(map[string]any)["minLength"])
 	require.Equal(t, "string", props["email"].(map[string]any)["type"])
 	require.Equal(t, "email", props["email"].(map[string]any)["format"])
+
+	components := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	userSchema := components["openapi_test_userResponse"].(map[string]any)
+	require.Equal(t, "object", userSchema["type"])
+	require.Contains(t, userSchema["properties"].(map[string]any), "id")
 }
 
 func TestHandlersServeGeneratedSpec(t *testing.T) {
