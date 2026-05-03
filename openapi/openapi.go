@@ -155,9 +155,11 @@ func (g *Generator) parameter(name, in string, required bool, field reflect.Stru
 }
 
 func (g *Generator) fieldSchemaRef(field reflect.StructField) *openapi3.SchemaRef {
-	schema := g.schema(field.Type)
-	applyBinding(schema, field)
-	return &openapi3.SchemaRef{Value: schema}
+	ref := g.schemaRef(field.Type)
+	if ref.Value != nil {
+		applyBinding(ref.Value, field)
+	}
+	return ref
 }
 
 func (g *Generator) addResponses(op *openapi3.Operation, typ reflect.Type) {

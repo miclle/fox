@@ -105,6 +105,7 @@ The MVP generates:
 - JSON request bodies from handler input struct fields
 - JSON response bodies from handler return values
 - Struct schemas under `components/schemas` with `$ref` reuse
+- Recursive and self-referential structs through component `$ref`s
 - Default error responses for handlers that return `error`
 - A reusable `HTTPError` schema based on `httperrors.Error`
 

@@ -29,12 +29,22 @@ type userResponse struct {
 	Email string `json:"email"`
 }
 
+type treeNode struct {
+	ID       int64      `json:"id"`
+	Parent   *treeNode  `json:"parent"`
+	Children []treeNode `json:"children"`
+}
+
 func getUser(_ *fox.Context, _ getUserRequest) (userResponse, error) {
 	return userResponse{}, nil
 }
 
 func createUser(_ *fox.Context, _ createUserRequest) userResponse {
 	return userResponse{}
+}
+
+func getTree(_ *fox.Context) treeNode {
+	return treeNode{}
 }
 
 func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
@@ -108,6 +118,24 @@ func TestHandlersServeGeneratedSpec(t *testing.T) {
 	require.Equal(t, http.StatusOK, yamlRecorder.Code)
 	require.Equal(t, "application/yaml; charset=utf-8", yamlRecorder.Header().Get("Content-Type"))
 	require.Contains(t, yamlRecorder.Body.String(), "/users/{id}:")
+}
+
+func TestGenerateSupportsRecursiveStructSchemas(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/tree", getTree)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	treeSchema := spec["components"].(map[string]any)["schemas"].(map[string]any)["openapi_test_treeNode"].(map[string]any)
+	props := treeSchema["properties"].(map[string]any)
+	require.Equal(t, "#/components/schemas/openapi_test_treeNode", props["parent"].(map[string]any)["$ref"])
+	require.Equal(t, "#/components/schemas/openapi_test_treeNode", props["children"].(map[string]any)["items"].(map[string]any)["$ref"])
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {
