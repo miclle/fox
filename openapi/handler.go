@@ -6,6 +6,7 @@ import (
 	"github.com/fox-gonic/fox"
 )
 
+// JSONHandler returns a Fox handler that serves the generated JSON spec.
 func JSONHandler(g *Generator) fox.HandlerFunc {
 	return func(ctx *fox.Context) {
 		data, err := g.JSON()
@@ -17,6 +18,7 @@ func JSONHandler(g *Generator) fox.HandlerFunc {
 	}
 }
 
+// YAMLHandler returns a Fox handler that serves the generated YAML spec.
 func YAMLHandler(g *Generator) fox.HandlerFunc {
 	return func(ctx *fox.Context) {
 		data, err := g.YAML()

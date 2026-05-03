@@ -18,8 +18,10 @@ import (
 	"github.com/fox-gonic/fox"
 )
 
+// Option configures a Generator.
 type Option func(*Generator)
 
+// Generator builds and serializes an OpenAPI specification for a Fox engine.
 type Generator struct {
 	engine      *fox.Engine
 	spec        *openapi3.T
@@ -27,6 +29,7 @@ type Generator struct {
 	warnings    []string
 }
 
+// Info sets the OpenAPI info title and version.
 func Info(title, version string) Option {
 	return func(g *Generator) {
 		g.spec.Info.Title = title
@@ -34,12 +37,14 @@ func Info(title, version string) Option {
 	}
 }
 
+// Server appends a server URL to the generated OpenAPI spec.
 func Server(url string) Option {
 	return func(g *Generator) {
 		g.spec.AddServer(&openapi3.Server{URL: url})
 	}
 }
 
+// New creates a Generator and immediately scans the engine's current routes.
 func New(engine *fox.Engine, opts ...Option) *Generator {
 	components := openapi3.NewComponents()
 	components.Schemas = openapi3.Schemas{}
@@ -64,10 +69,12 @@ func New(engine *fox.Engine, opts ...Option) *Generator {
 	return g
 }
 
+// Spec returns the generated OpenAPI model.
 func (g *Generator) Spec() *openapi3.T {
 	return g.spec
 }
 
+// Warnings returns non-fatal generation warnings.
 func (g *Generator) Warnings() []string {
 	return append([]string(nil), g.warnings...)
 }
@@ -76,14 +83,17 @@ func (g *Generator) warnf(format string, args ...any) {
 	g.warnings = append(g.warnings, fmt.Sprintf(format, args...))
 }
 
+// JSON serializes the generated spec as formatted JSON.
 func (g *Generator) JSON() ([]byte, error) {
 	return json.MarshalIndent(g.spec, "", "  ")
 }
 
+// YAML serializes the generated spec as YAML.
 func (g *Generator) YAML() ([]byte, error) {
 	return yaml.Marshal(g.spec)
 }
 
+// WriteYAML writes the generated YAML spec to w.
 func (g *Generator) WriteYAML(w io.Writer) error {
 	data, err := g.YAML()
 	if err != nil {
@@ -94,7 +104,7 @@ func (g *Generator) WriteYAML(w io.Writer) error {
 }
 
 func (g *Generator) generate() {
-	for _, route := range g.engine.OpenAPIRoutes() {
+	for _, route := range g.engine.HandlerRoutes() {
 		op := openapi3.NewOperation()
 		op.OperationID = operationID(route)
 		op.Responses = openapi3.NewResponses()
@@ -135,7 +145,7 @@ func hasParameter(op *openapi3.Operation, name, in string) bool {
 	return false
 }
 
-func (g *Generator) addInput(op *openapi3.Operation, route fox.OpenAPIRouteInfo, typ reflect.Type) {
+func (g *Generator) addInput(op *openapi3.Operation, route fox.RouteInfo, typ reflect.Type) {
 	typ = deref(typ)
 	if typ.Kind() != reflect.Struct {
 		return
@@ -357,7 +367,7 @@ func (g *Generator) addHTTPErrorSchema() {
 	}
 }
 
-func operationID(route fox.OpenAPIRouteInfo) string {
+func operationID(route fox.RouteInfo) string {
 	if route.HandlerName == "" {
 		return route.Method + "_" + route.Path
 	}

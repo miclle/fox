@@ -13,13 +13,13 @@ It shows how to:
 
 ```bash
 cd examples/08-openapi
-go run main.go
+go run .
 ```
 
 Use a different port if `8080` is already occupied:
 
 ```bash
-PORT=18080 go run main.go
+PORT=18080 go run .
 ```
 
 ## Try The API
@@ -72,3 +72,7 @@ The generated spec includes:
 
 This MVP does not read Go comments for summaries or field descriptions yet.
 Those descriptions are planned for a later comment-based metadata provider.
+
+The example is its own Go module and imports `github.com/fox-gonic/fox-openapi`.
+During monorepo development, `go.mod` points that import path to `../../openapi`
+with a local `replace`.

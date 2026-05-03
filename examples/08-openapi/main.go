@@ -6,8 +6,8 @@ import (
 	"strconv"
 
 	"github.com/fox-gonic/fox"
+	"github.com/fox-gonic/fox-openapi"
 	"github.com/fox-gonic/fox/httperrors"
-	"github.com/fox-gonic/fox/openapi"
 )
 
 type User struct {

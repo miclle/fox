@@ -105,8 +105,8 @@ type Engine struct {
 
 	RenderErrorFunc RenderErrorFunc
 
-	openAPIRoutesMu sync.RWMutex
-	openAPIRoutes   map[openAPIRouteKey]OpenAPIRouteInfo
+	handlerRoutesMu sync.RWMutex
+	handlerRoutes   map[handlerRouteKey]RouteInfo
 }
 
 func init() {

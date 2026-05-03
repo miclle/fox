@@ -1,8 +1,8 @@
 # Fox OpenAPI 自动生成 — 设计文档
 
 > 状态：Phase 1 MVP 已实现，Phase 2+ 草案
-> 版本：v0.2
-> 日期：2026-05-03
+> 版本：v0.3
+> 日期：2026-05-04
 
 ## 1. 背景与目标
 
@@ -15,7 +15,7 @@ Fox 框架以"约定优于配置"为核心，handler 通过反射自动绑定请
 
 **目标**：
 
-1. 提供一个新子包 `fox/openapi`，对任意 `*fox.Engine` 在运行期自动生成 OpenAPI 3.0.3 spec（可选升级到 3.1）
+1. 提供一个独立 Go module `github.com/fox-gonic/fox-openapi`，对任意 `*fox.Engine` 在运行期自动生成 OpenAPI 3.0.3 spec（可选升级到 3.1）
 2. 对现存 handler **零改造**即可获得基础 spec（路径、方法、参数、请求体、响应类型）
 3. 提供一套轻量元数据 API，按需补充 `summary`/`description`/`operationId`/`tags`/`security`/多状态码响应
 4. 内置 spec 输出端点（`/openapi.yaml`、`/openapi.json`）
@@ -71,18 +71,22 @@ flowchart LR
 ## 4. 包结构
 
 ```
-fox/openapi/
-├── openapi.go          // MVP 主入口：New / Spec / YAML / JSON / WriteYAML / Warnings
-├── handler.go          // YAMLHandler / JSONHandler
-└── openapi_test.go
+fox/
+├── route_registry.go   // fox core: HandlerRoutes / RouteInfo，仅暴露轻量元信息
+└── openapi/
+    ├── go.mod          // module github.com/fox-gonic/fox-openapi
+    ├── openapi.go      // MVP 主入口：New / Spec / YAML / JSON / WriteYAML / Warnings
+    ├── handler.go      // YAMLHandler / JSONHandler
+    └── openapi_test.go
 ```
 
-后续 Phase 2+ 可按复杂度再拆出 `reflector.go`、`schema.go`、`binding.go`、`metadata.go`、`builder.go`、`ui.go` 等文件。MVP 目前保持单文件核心实现，便于快速迭代。
+当前为了开发方便先放在 fox 仓库内，但 `openapi/` 已经是独立 module，并使用未来独立 repo 的 module path。功能稳定后可直接迁移到单独仓库，删除本地 `replace` 即可。
 
-为什么独立子包：
+为什么独立 module：
 
-- 避免主包引入 `kin-openapi` 这一较重依赖，主包用户按需 `import`
-- 与 `httperrors` / `render` 现有子包风格一致
+- 避免主包引入 `kin-openapi` 这一较重依赖
+- fox core 只暴露通用 `HandlerRoutes()`，不出现 OpenAPI 生成逻辑
+- 未来迁出独立 repo 时，用户 import path 不需要变化
 
 ## 5. 核心数据流
 
@@ -108,19 +112,21 @@ OpenAPI 生成只关心：
 
 `gin.Engine.Routes()` 返回 `[]gin.RouteInfo{Method, Path, Handler, HandlerFunc}`。但 fox 的 handler 被 `handleWrapper` 包装成 `gin.HandlerFunc`，原 handler 的 `reflect.Value` 已丢失。
 
-**方案**：在 `routergroup.go` 的 `Handle` 中，把原 `handler` 注册到新的 `engine.routeRegistry` 字典：
+**方案**：在 `routergroup.go` 的 `Handle` 中，把原 `handler` 注册到新的 `engine.handlerRoutes` 字典：
 
 ```go
-type routeKey struct{ Method, Path string }
-type routeEntry struct {
-    Handler  HandlerFunc
-    HandlerT reflect.Type
-    HandlerN string  // runtime func name
-    Doc      RouteDoc // 可选，由 builder API 或 DocProvider 写入
+type RouteInfo struct {
+    Method      string
+    Path        string
+    Handler     HandlerFunc
+    HandlerType reflect.Type
+    HandlerName string
 }
+
+func (engine *Engine) HandlerRoutes() []RouteInfo
 ```
 
-这是对主包的**唯一侵入式改动**。`routeRegistry` 默认开启，只记录轻量的路由与原始 handler 信息，不引入 `openapi` 子包依赖；如用户极度关注内存，可通过后续配置关闭采集。
+这是对主包的**唯一侵入式改动**。`handlerRoutes` 默认开启，只记录轻量的路由与原始 handler 信息，不引入 `fox-openapi` 依赖；如用户极度关注内存，可通过后续配置关闭采集。
 
 路径转换规则：
 
@@ -417,14 +423,14 @@ func (o *Op) Header(name, desc string, required bool) *Op
 | `github.com/swaggest/openapi-go` | API 设计较干净 | 文档较少，社区小 |
 | 自研 minimal struct + `goccy/go-yaml` | 零外部依赖，体积最小 | 维护成本高，要跟 OpenAPI 规范 |
 
-**推荐**：`kin-openapi`，置于子包内不影响主包用户。
+**推荐**：`kin-openapi`，置于独立 `fox-openapi` module 内，不影响主包用户。
 
 ## 13. 实施分阶段
 
 ### Phase 1 — MVP（约 2-3 天）
 
-- [x] 新增 `routeRegistry` 到 `Engine`，记录原 handler reflect.Type
-- [x] `fox/openapi` 包骨架 + reflector + schema cache
+- [x] 新增 `handlerRoutes` 到 `Engine`，记录原 handler reflect.Type
+- [x] `github.com/fox-gonic/fox-openapi` 独立 module 骨架 + reflector + schema cache
 - [x] 类型映射（基本类型 + struct + slice + map + pointer）
 - [x] tag 分类（json/query/uri/header/form/context）
 - [x] 常见 `binding` tag → schema 约束（required/email/min/max/gt/lt/oneof）
@@ -464,8 +470,8 @@ func (o *Op) Header(name, desc string, required bool) *Op
 | 反射性能开销 | 启动期一次性 | 用 schema cache，路由注册期增量构建 |
 | handler 返回 `any` | spec 信息缺失 | 输出 warning 列表；推荐用具体类型 |
 | 循环引用 struct | 栈溢出 | schema cache 在递归前先放占位符 `$ref` |
-| `engine.routeRegistry` 内存占用 | 路由多时占用上升 | 默认只存轻量 reflect 信息；后续提供关闭采集配置 |
-| `kin-openapi` 升级破坏性变更 | API 不稳定 | 在 `fox/openapi` 内做一层薄封装，不暴露原始类型 |
+| `engine.handlerRoutes` 内存占用 | 路由多时占用上升 | 默认只存轻量 reflect 信息；后续提供关闭采集配置 |
+| `kin-openapi` 升级破坏性变更 | API 不稳定 | 在 `fox-openapi` 内做一层薄封装，不暴露原始类型 |
 | 与 `swag` 等用户自有方案冲突 | 用户已有 spec | 提供 `openapi.Merge(existingSpec)` 合并能力 |
 
 ## 15. 待确认问题

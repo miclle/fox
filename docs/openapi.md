@@ -11,11 +11,21 @@ version does not require `doc` tags or a separate code generation step.
 
 ## Install
 
-The OpenAPI generator lives in a separate subpackage:
+The OpenAPI generator lives in a separate module. While it is developed in this
+repository, it already uses the future standalone import path:
 
 ```go
-import "github.com/fox-gonic/fox/openapi"
+import "github.com/fox-gonic/fox-openapi"
 ```
+
+During monorepo development, `openapi/go.mod` uses:
+
+```go
+replace github.com/fox-gonic/fox => ../
+```
+
+After moving the module to its own repository, that local `replace` can be
+removed.
 
 ## Basic Usage
 
@@ -26,7 +36,7 @@ package main
 
 import (
 	"github.com/fox-gonic/fox"
-	"github.com/fox-gonic/fox/openapi"
+	"github.com/fox-gonic/fox-openapi"
 )
 
 type GetUserRequest struct {
