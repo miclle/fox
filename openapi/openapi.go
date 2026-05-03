@@ -213,6 +213,8 @@ func (g *Generator) fieldSchemaRef(field reflect.StructField) *openapi3.SchemaRe
 
 func (g *Generator) addResponses(op *openapi3.Operation, typ reflect.Type) {
 	if typ.NumOut() == 0 {
+		op.Responses.Set("200", &openapi3.ResponseRef{Value: openapi3.NewResponse().
+			WithDescription(http.StatusText(http.StatusOK))})
 		return
 	}
 

@@ -64,6 +64,8 @@ func getItem(_ *fox.Context) string {
 	return "item"
 }
 
+func noop(_ *fox.Context) {}
+
 func login(_ *fox.Context, _ loginRequest) string {
 	return "ok"
 }
@@ -230,6 +232,24 @@ func TestGenerateDocumentsRoutePathParamsWithoutInputStruct(t *testing.T) {
 
 	itemOp := spec["paths"].(map[string]any)["/items/{id}"].(map[string]any)["get"].(map[string]any)
 	requireParameter(t, itemOp["parameters"].([]any), "id", "path", true, "string")
+}
+
+func TestGenerateDocumentsNoReturnHandlersWithEmptyOKResponse(t *testing.T) {
+	engine := fox.New()
+	engine.POST("/noop", noop)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	noopOp := spec["paths"].(map[string]any)["/noop"].(map[string]any)["post"].(map[string]any)
+	response := noopOp["responses"].(map[string]any)["200"].(map[string]any)
+	require.Equal(t, "OK", response["description"])
+	require.NotContains(t, response, "content")
 }
 
 func requireParameter(t *testing.T, parameters []any, name, in string, required bool, schemaType string) {

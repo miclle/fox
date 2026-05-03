@@ -131,6 +131,7 @@ The MVP generates:
 - URL-encoded form request bodies from `form` tags
 - JSON response bodies from handler return values
 - `text/plain` response bodies for handlers that return `string`
+- empty `200 OK` responses for handlers with no return value
 - Struct schemas under `components/schemas` with `$ref` reuse
 - Recursive and self-referential structs through component `$ref`s
 - Default error responses for handlers that return `error`
