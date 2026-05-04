@@ -6,17 +6,17 @@ import (
 	"strconv"
 
 	"github.com/fox-gonic/fox"
-	"github.com/fox-gonic/fox-openapi"
+	openapi "github.com/fox-gonic/fox-openapi"
 	"github.com/fox-gonic/fox/httperrors"
 )
 
 type User struct {
 	// Stable user identifier.
-	ID int64 `json:"id"`
+	ID int64 `json:"id"` // Stable user identifier. line comment is required for OpenAPI schema generation.
 	// Display name.
-	Name string `json:"name"`
+	Name string `json:"name"` // Display name. line comment is required for OpenAPI schema generation.
 	// Email address.
-	Email string `json:"email"`
+	Email string `json:"email"` // Email address. line comment is required for OpenAPI schema generation.
 }
 
 type ListUsersRequest struct {

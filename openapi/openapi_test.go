@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/getkin/kin-openapi/openapi3"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/fox-gonic/fox"
 	"github.com/fox-gonic/fox-openapi"
+	v1users "github.com/fox-gonic/fox-openapi/internal/collisionfixture/v1/users"
+	v2users "github.com/fox-gonic/fox-openapi/internal/collisionfixture/v2/users"
 )
 
 type getUserRequest struct {
@@ -197,6 +200,64 @@ func TestHandlersServeGeneratedSpec(t *testing.T) {
 	require.Contains(t, yamlRecorder.Body.String(), "/users/{id}:")
 }
 
+func TestGenerateIsLazyAndPicksUpRoutesAfterNew(t *testing.T) {
+	engine := fox.New()
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+	engine.GET("/users/:id", getUser)
+	engine.POST("/users", createUser)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	paths := spec["paths"].(map[string]any)
+	require.Contains(t, paths, "/users/{id}")
+	require.Contains(t, paths, "/users")
+}
+
+func TestMountExcludesSpecEndpointsFromGeneratedPaths(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/users/:id", getUser)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+	openapi.Mount(engine, g)
+
+	jsonRecorder := httptest.NewRecorder()
+	engine.ServeHTTP(jsonRecorder, httptest.NewRequest(http.MethodGet, "/openapi.json", nil))
+	require.Equal(t, http.StatusOK, jsonRecorder.Code)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(jsonRecorder.Body.Bytes(), &spec))
+	paths := spec["paths"].(map[string]any)
+	require.Contains(t, paths, "/users/{id}")
+	require.NotContains(t, paths, "/openapi.json")
+	require.NotContains(t, paths, "/openapi.yaml")
+}
+
+func TestRegenerateRefreshesPathsAfterNewRoutes(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/users/:id", getUser)
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+	_, err := g.JSON()
+	require.NoError(t, err)
+
+	engine.POST("/users", createUser)
+	g.Regenerate()
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+	paths := spec["paths"].(map[string]any)
+	require.Contains(t, paths, "/users/{id}")
+	require.Contains(t, paths, "/users")
+}
+
 func TestMountRegistersGeneratedSpecHandlers(t *testing.T) {
 	engine := fox.New()
 	engine.GET("/users/:id", getUser)
@@ -345,7 +406,7 @@ func TestGenerateReadsHandlerAndFieldCommentsFromSource(t *testing.T) {
 
 	g := openapi.New(engine,
 		openapi.Info("Fox Test API", "1.0.0"),
-		openapi.Source("./..."),
+		openapi.Source([]string{"./..."}, openapi.IncludeTestFiles()),
 	)
 
 	data, err := g.JSON()
@@ -373,7 +434,7 @@ func TestGenerateReadsFieldLineCommentsFromSource(t *testing.T) {
 
 	g := openapi.New(engine,
 		openapi.Info("Fox Test API", "1.0.0"),
-		openapi.Source("./..."),
+		openapi.Source([]string{"./..."}, openapi.IncludeTestFiles()),
 	)
 
 	data, err := g.JSON()
@@ -393,7 +454,7 @@ func TestGenerateCombinesFieldDocAndLineCommentsFromSource(t *testing.T) {
 
 	g := openapi.New(engine,
 		openapi.Info("Fox Test API", "1.0.0"),
-		openapi.Source("./..."),
+		openapi.Source([]string{"./..."}, openapi.IncludeTestFiles()),
 	)
 
 	data, err := g.JSON()
@@ -413,7 +474,7 @@ func TestGenerateAppliesExplicitOperationMetadata(t *testing.T) {
 
 	g := openapi.New(engine,
 		openapi.Info("Fox Test API", "1.0.0"),
-		openapi.Source("./..."),
+		openapi.Source([]string{"./..."}, openapi.IncludeTestFiles()),
 		openapi.Operation("POST", "/documented-users",
 			openapi.Summary("Create user override"),
 			openapi.Description("Explicit operation description."),
@@ -525,6 +586,39 @@ func TestGenerateUsesRegisteredFormatters(t *testing.T) {
 	id := props["id"].(map[string]any)
 	require.Equal(t, "string", id["type"])
 	require.Equal(t, "uuid", id["format"])
+}
+
+func TestSchemaNameCollisionFallsBackToFullPath(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/v1/users", func(_ *fox.Context) v1users.User { return v1users.User{} })
+	engine.GET("/v2/users", func(_ *fox.Context) v2users.User { return v2users.User{} })
+
+	g := openapi.New(engine, openapi.Info("Fox Test API", "1.0.0"))
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	v1Op := spec["paths"].(map[string]any)["/v1/users"].(map[string]any)["get"].(map[string]any)
+	v2Op := spec["paths"].(map[string]any)["/v2/users"].(map[string]any)["get"].(map[string]any)
+	v1Schema := v1Op["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["$ref"].(string)
+	v2Schema := v2Op["responses"].(map[string]any)["200"].(map[string]any)["content"].(map[string]any)["application/json"].(map[string]any)["schema"].(map[string]any)["$ref"].(string)
+
+	require.NotEqual(t, v1Schema, v2Schema, "distinct types must produce distinct schema refs")
+
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	v1Ref := strings.TrimPrefix(v1Schema, "#/components/schemas/")
+	v2Ref := strings.TrimPrefix(v2Schema, "#/components/schemas/")
+	require.Contains(t, schemas, v1Ref)
+	require.Contains(t, schemas, v2Ref)
+
+	// HandlerRoutes is sorted by path so v1 is registered first and keeps
+	// the short name; v2 falls back to the full-path form.
+	require.Equal(t, "users_User", v1Ref)
+	require.Contains(t, v2Ref, "v2")
+	require.NotEmpty(t, g.Warnings(), "collision should produce a warning")
 }
 
 func TestGenerateUsesCustomErrorSchema(t *testing.T) {

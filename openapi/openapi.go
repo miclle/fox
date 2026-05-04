@@ -22,16 +22,22 @@ import (
 type Option func(*Generator)
 
 // Generator builds and serializes an OpenAPI specification for a Fox engine.
+//
+// Generation is lazy: routes registered after New() are still picked up on the
+// next Spec()/JSON()/YAML() call. Schemas are cached across regenerations so
+// repeated calls only re-walk the route table.
 type Generator struct {
-	engine      *fox.Engine
-	spec        *openapi3.T
-	schemaNames map[reflect.Type]string
-	warnings    []string
-	docs        *commentDocs
-	operations  map[operationKey]operationDoc
-	groups      []groupDoc
-	formatters  map[reflect.Type]*openapi3.Schema
-	errorSchema reflect.Type
+	engine       *fox.Engine
+	spec         *openapi3.T
+	schemaNames  map[reflect.Type]string
+	schemaByName map[string]reflect.Type
+	warnings     []string
+	docs         *commentDocs
+	operations   map[operationKey]operationDoc
+	groups       []groupDoc
+	formatters   map[reflect.Type]*openapi3.Schema
+	errorSchema  reflect.Type
+	generated    bool
 }
 
 // Info sets the OpenAPI info title and version.
@@ -55,10 +61,11 @@ func New(engine *fox.Engine, opts ...Option) *Generator {
 	components.Schemas = openapi3.Schemas{}
 
 	g := &Generator{
-		engine:      engine,
-		schemaNames: make(map[reflect.Type]string),
-		operations:  make(map[operationKey]operationDoc),
-		formatters:  make(map[reflect.Type]*openapi3.Schema),
+		engine:       engine,
+		schemaNames:  make(map[reflect.Type]string),
+		schemaByName: make(map[string]reflect.Type),
+		operations:   make(map[operationKey]operationDoc),
+		formatters:   make(map[reflect.Type]*openapi3.Schema),
 		spec: &openapi3.T{
 			OpenAPI:    "3.0.3",
 			Info:       &openapi3.Info{Title: "Fox API", Version: "0.0.0"},
@@ -71,18 +78,38 @@ func New(engine *fox.Engine, opts ...Option) *Generator {
 		opt(g)
 	}
 
-	g.addHTTPErrorSchema()
-	g.generate()
 	return g
 }
 
-// Spec returns the generated OpenAPI model.
+// Spec returns the generated OpenAPI model. The first call walks the engine's
+// route table; subsequent calls also re-walk so freshly registered routes are
+// reflected.
 func (g *Generator) Spec() *openapi3.T {
+	g.ensureGenerated()
 	return g.spec
 }
 
-// Warnings returns non-fatal generation warnings.
+// Regenerate forces a full re-scan of the engine's routes on the next access.
+// Useful when routes are added dynamically and the caller wants the next
+// JSON()/YAML() call to reflect them without retaining stale state.
+func (g *Generator) Regenerate() {
+	g.generated = false
+	g.spec.Paths = openapi3.NewPaths()
+}
+
+func (g *Generator) ensureGenerated() {
+	if g.generated {
+		return
+	}
+	g.addHTTPErrorSchema()
+	g.generate()
+	g.generated = true
+}
+
+// Warnings returns non-fatal generation warnings, triggering generation if it
+// has not yet happened.
 func (g *Generator) Warnings() []string {
+	g.ensureGenerated()
 	return append([]string(nil), g.warnings...)
 }
 
@@ -92,11 +119,13 @@ func (g *Generator) warnf(format string, args ...any) {
 
 // JSON serializes the generated spec as formatted JSON.
 func (g *Generator) JSON() ([]byte, error) {
+	g.ensureGenerated()
 	return json.MarshalIndent(g.spec, "", "  ")
 }
 
 // YAML serializes the generated spec as YAML.
 func (g *Generator) YAML() ([]byte, error) {
+	g.ensureGenerated()
 	return yaml.Marshal(g.spec)
 }
 
@@ -112,25 +141,35 @@ func (g *Generator) WriteYAML(w io.Writer) error {
 
 func (g *Generator) generate() {
 	for _, route := range g.engine.HandlerRoutes() {
-		op := openapi3.NewOperation()
-		op.OperationID = operationID(route)
-		op.Responses = openapi3.NewResponses()
-		if g.docs != nil {
-			if text := g.docs.funcDoc(route.HandlerName); text != "" {
-				op.Summary = firstParagraph(text)
-				op.Description = text
-			}
-		}
-
-		if route.HandlerType.NumIn() == 2 {
-			g.addInput(op, route, route.HandlerType.In(1))
-		}
-		g.addMissingPathParams(op, route.Path)
-		g.addResponses(op, route.HandlerType)
-		g.applyOperationDoc(op, route.Method, route.Path)
-
-		g.spec.AddOperation(openAPIPath(route.Path), route.Method, op)
+		g.generateRoute(route)
 	}
+}
+
+func (g *Generator) generateRoute(route fox.RouteInfo) {
+	defer func() {
+		if r := recover(); r != nil {
+			g.warnf("openapi: skipped %s %s due to panic during generation: %v", route.Method, route.Path, r)
+		}
+	}()
+
+	op := openapi3.NewOperation()
+	op.OperationID = operationID(route)
+	op.Responses = openapi3.NewResponses()
+	if g.docs != nil {
+		if text := g.docs.funcDoc(route.HandlerName); text != "" {
+			op.Summary = firstParagraph(text)
+			op.Description = text
+		}
+	}
+
+	if route.HandlerType.NumIn() == 2 {
+		g.addInput(op, route, route.HandlerType.In(1))
+	}
+	g.addMissingPathParams(op, route.Path)
+	g.addResponses(op, route.HandlerType)
+	g.applyOperationDoc(op, route.Method, route.Path)
+
+	g.spec.AddOperation(openAPIPath(route.Path), route.Method, op)
 }
 
 func (g *Generator) addMissingPathParams(op *openapi3.Operation, path string) {
@@ -227,10 +266,6 @@ func (g *Generator) parameter(name, in string, required bool, owner reflect.Type
 	}
 }
 
-func (g *Generator) fieldSchemaRef(field reflect.StructField) *openapi3.SchemaRef {
-	return g.fieldSchemaRefForType(nil, field)
-}
-
 func (g *Generator) fieldSchemaRefForType(owner reflect.Type, field reflect.StructField) *openapi3.SchemaRef {
 	ref := g.schemaRef(field.Type)
 	if ref.Value != nil {
@@ -288,15 +323,39 @@ func (g *Generator) componentSchemaRef(typ reflect.Type) *openapi3.SchemaRef {
 		return &openapi3.SchemaRef{Ref: "#/components/schemas/" + name}
 	}
 
-	name := schemaName(typ)
+	name := g.uniqueSchemaName(typ)
+	// Reserve the name BEFORE recursing so self-referential structs see the
+	// $ref instead of recursing forever.
 	g.schemaNames[typ] = name
-
-	if _, exists := g.spec.Components.Schemas[name]; !exists {
-		g.spec.Components.Schemas[name] = &openapi3.SchemaRef{Value: openapi3.NewObjectSchema()}
-		g.spec.Components.Schemas[name] = &openapi3.SchemaRef{Value: g.objectSchema(typ)}
-	}
+	g.schemaByName[name] = typ
+	g.spec.Components.Schemas[name] = &openapi3.SchemaRef{Value: g.objectSchema(typ)}
 
 	return &openapi3.SchemaRef{Ref: "#/components/schemas/" + name}
+}
+
+// uniqueSchemaName resolves a stable component name for typ. First arrival
+// keeps the short name; subsequent collisions fall back to the full package
+// path so previously-emitted $refs remain valid.
+func (g *Generator) uniqueSchemaName(typ reflect.Type) string {
+	short := schemaName(typ)
+	if existing, ok := g.schemaByName[short]; !ok || existing == typ {
+		return short
+	}
+
+	g.warnf("openapi: schema name %q collides between %s and %s; using full-path name for the latter",
+		short, g.schemaByName[short].PkgPath(), typ.PkgPath())
+
+	long := schemaNameWithFullPath(typ)
+	if existing, ok := g.schemaByName[long]; !ok || existing == typ {
+		return long
+	}
+
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s_%d", long, i)
+		if _, exists := g.schemaByName[candidate]; !exists {
+			return candidate
+		}
+	}
 }
 
 func (g *Generator) schema(typ reflect.Type) *openapi3.Schema {
@@ -380,12 +439,14 @@ func (g *Generator) objectSchema(typ reflect.Type) *openapi3.Schema {
 }
 
 func (g *Generator) addHTTPErrorSchema() {
+	if g.spec.Components.Responses == nil {
+		g.spec.Components.Responses = openapi3.ResponseBodies{}
+	}
+
 	if g.errorSchema != nil {
-		g.spec.Components.Responses = openapi3.ResponseBodies{
-			"HTTPError": &openapi3.ResponseRef{Value: openapi3.NewResponse().
-				WithDescription("Error response").
-				WithJSONSchemaRef(g.schemaRef(g.errorSchema))},
-		}
+		g.spec.Components.Responses["HTTPError"] = &openapi3.ResponseRef{Value: openapi3.NewResponse().
+			WithDescription("Error response").
+			WithJSONSchemaRef(g.schemaRef(g.errorSchema))}
 		return
 	}
 
@@ -395,19 +456,36 @@ func (g *Generator) addHTTPErrorSchema() {
 		WithRequired([]string{"code", "error"}).
 		WithAnyAdditionalProperties()}
 
-	g.spec.Components.Responses = openapi3.ResponseBodies{
-		"HTTPError": &openapi3.ResponseRef{Value: openapi3.NewResponse().
-			WithDescription("Error response").
-			WithJSONSchemaRef(&openapi3.SchemaRef{Ref: "#/components/schemas/HTTPError"})},
-	}
+	g.spec.Components.Responses["HTTPError"] = &openapi3.ResponseRef{Value: openapi3.NewResponse().
+		WithDescription("Error response").
+		WithJSONSchemaRef(&openapi3.SchemaRef{Ref: "#/components/schemas/HTTPError"})}
 }
 
 func operationID(route fox.RouteInfo) string {
 	if route.HandlerName == "" {
 		return route.Method + "_" + route.Path
 	}
-	replacer := strings.NewReplacer("/", "_", ".", "_", "-", "_", ":", "_", "*", "_")
-	return strings.Trim(replacer.Replace(route.HandlerName), "_")
+	name := cleanHandlerName(route.HandlerName)
+	return sanitizeName(name)
+}
+
+// cleanHandlerName strips runtime decorations that pollute operationIds:
+//   - "-fm" suffix on method-value (bound method) names
+//   - ".funcN" trailing closure markers
+func cleanHandlerName(name string) string {
+	name = strings.TrimSuffix(name, "-fm")
+	for {
+		idx := strings.LastIndex(name, ".func")
+		if idx < 0 {
+			break
+		}
+		suffix := name[idx+len(".func"):]
+		if suffix == "" || !allDigits(suffix) {
+			break
+		}
+		name = name[:idx]
+	}
+	return name
 }
 
 func schemaName(typ reflect.Type) string {
@@ -416,13 +494,26 @@ func schemaName(typ reflect.Type) string {
 		pkg = pkg[idx+1:]
 	}
 	if pkg == "" {
-		return typ.Name()
+		return sanitizeName(typ.Name())
+	}
+	return sanitizeName(pkg + "_" + typ.Name())
+}
+
+// schemaNameWithFullPath produces a collision-resistant component name by
+// using the full package import path with separators replaced.
+func schemaNameWithFullPath(typ reflect.Type) string {
+	pkg := typ.PkgPath()
+	if pkg == "" {
+		return sanitizeName(typ.Name())
 	}
 	return sanitizeName(pkg + "_" + typ.Name())
 }
 
 func sanitizeName(value string) string {
-	replacer := strings.NewReplacer("/", "_", ".", "_", "-", "_", ":", "_", "*", "_")
+	replacer := strings.NewReplacer(
+		"/", "_", ".", "_", "-", "_", ":", "_", "*", "_",
+		"[", "_", "]", "_", "<", "_", ">", "_", ",", "_", " ", "_",
+	)
 	return strings.Trim(replacer.Replace(value), "_")
 }
 
