@@ -61,6 +61,27 @@ func TestWriteDriverRendersMetadataAndAbsoluteSources(t *testing.T) {
 	}
 }
 
+func TestWriteDriverOmitsOpenAPI3ImportWhenUnused(t *testing.T) {
+	dir := t.TempDir()
+	cfg := Config{
+		Workdir: dir,
+		Format:  "yaml",
+		Sources: []string{},
+		Info:    InfoConfig{Title: "Acme", Version: "1.0.0"},
+	}
+	driverDir, err := WriteDriver(cfg, Entry{ImportPath: "example.com/app", FuncName: "NewEngine"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(driverDir, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "github.com/getkin/kin-openapi/openapi3") {
+		t.Fatalf("driver imported openapi3 when unused:\n%s", data)
+	}
+}
+
 func TestCleanupDriverRemovesEmptyParent(t *testing.T) {
 	dir := t.TempDir()
 	driverDir := filepath.Join(dir, ".fox-openapi", "driver")

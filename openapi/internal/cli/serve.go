@@ -39,9 +39,16 @@ func Serve(cfg Config, serveCfg ServeConfig) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/openapi.yaml", state.handleYAML)
 	mux.HandleFunc("/openapi.json", state.handleJSON)
-	mux.HandleFunc("/docs", ui.Handler("swagger", "/openapi.yaml"))
-	mux.HandleFunc("/scalar", ui.Handler("scalar", "/openapi.yaml"))
-	mux.HandleFunc("/redoc", ui.Handler("redoc", "/openapi.yaml"))
+	for _, name := range normalizeUIs(serveCfg.UIs) {
+		switch name {
+		case "swagger", "docs":
+			mux.HandleFunc("/docs", ui.Handler("swagger", "/openapi.yaml"))
+		case "scalar":
+			mux.HandleFunc("/scalar", ui.Handler("scalar", "/openapi.yaml"))
+		case "redoc":
+			mux.HandleFunc("/redoc", ui.Handler("redoc", "/openapi.yaml"))
+		}
+	}
 	mux.Handle("/assets/", ui.AssetsHandler())
 	if serveCfg.Open {
 		go func() {
@@ -114,10 +121,18 @@ func normalizeUIs(values []string) []string {
 	if len(values) == 0 {
 		return []string{"swagger"}
 	}
+	seen := map[string]struct{}{}
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		value = strings.ToLower(strings.TrimSpace(value))
+		if value == "docs" {
+			value = "swagger"
+		}
 		if value != "" {
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
 			out = append(out, value)
 		}
 	}

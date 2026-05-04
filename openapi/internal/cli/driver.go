@@ -23,7 +23,9 @@ import (
 
 	"github.com/fox-gonic/fox"
 	openapi "github.com/fox-gonic/fox-openapi"
+	{{- if .UsesOpenAPI3 }}
 	"github.com/getkin/kin-openapi/openapi3"
+	{{- end }}
 	{{- if eq .Format "yaml" }}
 	"github.com/goccy/go-yaml"
 	{{- end }}
@@ -99,6 +101,7 @@ type DriverData struct {
 	InfoDescription    string
 	ServerDescriptions []ServerDescription
 	TagSnippets        []string
+	UsesOpenAPI3       bool
 }
 
 type ServerDescription struct {
@@ -176,6 +179,7 @@ func BuildDriverData(cfg Config, entry Entry, hook *Hook) (DriverData, error) {
 		InfoDescription:    cfg.Info.Description,
 		ServerDescriptions: serverDescriptions,
 		TagSnippets:        tagSnippets,
+		UsesOpenAPI3:       len(tagSnippets) > 0 || len(cfg.SecuritySchemes) > 0,
 	}
 	if hook != nil {
 		data.Hook = *hook
