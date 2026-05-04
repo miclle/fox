@@ -1,0 +1,22 @@
+name: OpenAPI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  openapi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Generate OpenAPI CLI fixture spec
+        working-directory: openapi
+        run: go run ./cmd/fox-openapi generate --workdir ../examples/09-openapi-cli
+      - name: Verify generated spec is up to date
+        run: git diff --exit-code examples/09-openapi-cli/api/openapi.yaml
+

@@ -1,16 +1,10 @@
-module github.com/fox-gonic/fox-openapi
+module github.com/fox-gonic/fox/examples/09-openapi-cli
 
 go 1.25.0
 
 require (
 	github.com/fox-gonic/fox v0.0.0
-	github.com/fsnotify/fsnotify v1.9.0
-	github.com/getkin/kin-openapi v0.137.0
-	github.com/gin-gonic/gin v1.12.0
-	github.com/goccy/go-yaml v1.19.2
-	github.com/stretchr/testify v1.11.1
-	golang.org/x/mod v0.35.0
-	golang.org/x/tools v0.44.0
+	github.com/fox-gonic/fox-openapi v0.0.0
 )
 
 require (
@@ -18,16 +12,18 @@ require (
 	github.com/bytedance/sonic v1.15.0 // indirect
 	github.com/bytedance/sonic/loader v0.5.0 // indirect
 	github.com/cloudwego/base64x v0.1.6 // indirect
-	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
+	github.com/getkin/kin-openapi v0.137.0 // indirect
 	github.com/gin-contrib/cors v1.7.7 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect
+	github.com/gin-gonic/gin v1.12.0 // indirect
 	github.com/go-openapi/jsonpointer v0.21.0 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-playground/locales v0.14.1 // indirect
 	github.com/go-playground/universal-translator v0.18.1 // indirect
 	github.com/go-playground/validator/v10 v10.30.1 // indirect
 	github.com/goccy/go-json v0.10.6 // indirect
+	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
@@ -43,7 +39,6 @@ require (
 	github.com/oasdiff/yaml3 v0.0.12 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
-	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.59.0 // indirect
 	github.com/rs/zerolog v1.35.1 // indirect
@@ -55,7 +50,6 @@ require (
 	golang.org/x/arch v0.25.0 // indirect
 	golang.org/x/crypto v0.50.0 // indirect
 	golang.org/x/net v0.53.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
@@ -63,4 +57,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/fox-gonic/fox => ../
+replace github.com/fox-gonic/fox => ../../
+
+replace github.com/fox-gonic/fox-openapi => ../../openapi

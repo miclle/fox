@@ -1,6 +1,6 @@
 # Fox OpenAPI — 设计与 CLI 实现交接文档
 
-> 状态：library 已实现 Phase 1+2 作为内部反射载体；CLI 为生产推荐方向，待实现
+> 状态：library 已实现 Phase 1+2 作为内部反射载体；CLI 已实现为生产推荐方向
 > 版本：v0.9（统一 go run → go build+exec 表述、§1.3 改顶层 tag registry、§8.1 API 稳定声明与新增 option 对齐、TODO 6 二选一并更新 driver 模板）
 > 日期：2026-05-04
 > 接收方注意：本文档面向**没有当前会话上下文**的实现者（人或 AI）。所有背景、目标、决策、陷阱、验收标准都写在此文档内，不需要回看会话历史。
@@ -1032,6 +1032,10 @@ openapi.Mount(router, spec)
 | `driver build failed` (退出 2) | 用户代码编译错 | 先 `go build ./...` 修复 |
 | `entry returned error` (退出 3) | entry 返回 non-nil error | 看 stderr cause |
 | `out of date` (退出 4) | check 模式 spec 不一致 | 跑 `fox-openapi generate` 提交 |
+| `user module must require github.com/fox-gonic/fox-openapi` | driver 需要在用户 module 中 import library | 运行 `go get github.com/fox-gonic/fox-openapi`，或传 `--auto-add` |
+| `missing go.sum entry` | 用户 module 虽然 require 了 fox-openapi，但缺少 transitive checksum | 在用户 module 里运行 `go get github.com/getkin/kin-openapi/openapi3@<version>` 或 `go mod tidy` 后重跑 |
+| 输出文件混入日志 | entry 阶段用户代码直接写 stdout | 将用户日志改到 stderr，或从 entry 中移除副作用 |
+| serve 修改源码后没刷新 | watcher 未覆盖路径，或编译失败保留上一份 spec | 检查 `sources` 配置，并查看 CLI stderr |
 
 ---
 

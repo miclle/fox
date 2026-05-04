@@ -1,0 +1,17 @@
+<!doctype html>
+<!-- Offline Scalar. Pinned dist target: @scalar/api-reference@1.55.1. -->
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scalar</title>
+  <link rel="stylesheet" href="/assets/scalar-style.css">
+</head>
+<body>
+  <div id="app"></div>
+  <script src="/assets/scalar-standalone.js"></script>
+  <script>
+    Scalar.createApiReference("#app", { url: {{printf "%q" .SpecURL}} })
+  </script>
+</body>
+</html>
