@@ -56,6 +56,10 @@ type documentedUserResponse struct {
 	ID int64 `json:"id"`
 }
 
+type lineCommentResponse struct {
+	ID int64 `json:"id"` // Stable user identifier from a line comment.
+}
+
 type customID string
 
 type customIDResponse struct {
@@ -105,6 +109,10 @@ func createDocumentedUser(_ *fox.Context, _ documentedCreateUserRequest) documen
 
 func getCustomID(_ *fox.Context) customIDResponse {
 	return customIDResponse{}
+}
+
+func getLineComment(_ *fox.Context) lineCommentResponse {
+	return lineCommentResponse{}
 }
 
 func TestGenerateDocumentsRoutesParametersBodiesAndResponses(t *testing.T) {
@@ -348,6 +356,26 @@ func TestGenerateReadsHandlerAndFieldCommentsFromSource(t *testing.T) {
 	responseSchemaName := "fox_openapi_test_documentedUserResponse"
 	responseProps := spec["components"].(map[string]any)["schemas"].(map[string]any)[responseSchemaName].(map[string]any)["properties"].(map[string]any)
 	require.Equal(t, "Stable user identifier.", responseProps["id"].(map[string]any)["description"])
+}
+
+func TestGenerateReadsFieldLineCommentsFromSource(t *testing.T) {
+	engine := fox.New()
+	engine.GET("/line-comment", getLineComment)
+
+	g := openapi.New(engine,
+		openapi.Info("Fox Test API", "1.0.0"),
+		openapi.Source("./..."),
+	)
+
+	data, err := g.JSON()
+	require.NoError(t, err)
+
+	var spec map[string]any
+	require.NoError(t, json.Unmarshal(data, &spec))
+
+	schemaName := "fox_openapi_test_lineCommentResponse"
+	props := spec["components"].(map[string]any)["schemas"].(map[string]any)[schemaName].(map[string]any)["properties"].(map[string]any)
+	require.Equal(t, "Stable user identifier from a line comment.", props["id"].(map[string]any)["description"])
 }
 
 func TestGenerateAppliesExplicitOperationMetadata(t *testing.T) {
