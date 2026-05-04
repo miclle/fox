@@ -1,7 +1,7 @@
 # Fox OpenAPI — 设计与 CLI 实现交接文档
 
 > 状态：library 已实现 Phase 1+2 作为内部反射载体；CLI 为生产推荐方向，待实现
-> 版本：v0.7（澄清 tags 语义边界、补全 metadataHook/autoAdd flag、修正 Content-Type 与类型映射的实现声明、补全 hook 示例 import）
+> 版本：v0.8（明确 info/server/tag 描述类字段的 library 缺口、TODO 6 区分顶层 tag registry、driver 改 build+exec 以可靠区分退出码 2/3）
 > 日期：2026-05-04
 > 接收方注意：本文档面向**没有当前会话上下文**的实现者（人或 AI）。所有背景、目标、决策、陷阱、验收标准都写在此文档内，不需要回看会话历史。
 
@@ -309,7 +309,7 @@ flowchart TB
     B --> C[Entry Resolver]
     C --> D[Driver Generator]
     D --> E[Temp Workspace]
-    E --> F[go run]
+    E --> F[go build -> exec]
     F --> G[Driver Process]
     G -->|stdout: spec bytes| H[CLI Receiver]
     H --> I[Format & Write]
@@ -460,15 +460,29 @@ CLI 第一次运行时检查：
 
 ### 5.5 Driver 执行
 
+为了**可靠区分编译失败（退出 2）与运行时崩溃（退出 3）**，分两步执行——先 `go build` 再 exec 产物，而不是一步 `go run`：
+
 ```go
 func runDriver(driverDir string) ([]byte, error) {
-    cmd := exec.Command("go", "run", ".")
-    cmd.Dir = driverDir // <workdir>/.fox-openapi/driver/
+    // 阶段 1：编译
+    binPath := filepath.Join(driverDir, "driver.bin") // .gitignore 已忽略
+    buildCmd := exec.Command("go", "build", "-o", binPath, ".")
+    buildCmd.Dir = driverDir
+    var buildErr bytes.Buffer
+    buildCmd.Stderr = &buildErr
+    if err := buildCmd.Run(); err != nil {
+        return nil, &driverError{phase: phaseBuild, exitCode: 2, stderr: buildErr.String(), cause: err}
+    }
+    defer os.Remove(binPath)
+
+    // 阶段 2：执行
+    runCmd := exec.Command(binPath)
+    runCmd.Dir = driverDir
     var stdout, stderr bytes.Buffer
-    cmd.Stdout = &stdout
-    cmd.Stderr = &stderr
-    if err := cmd.Run(); err != nil {
-        return nil, &driverError{exitCode: cmd.ProcessState.ExitCode(), stderr: stderr.String(), cause: err}
+    runCmd.Stdout = &stdout
+    runCmd.Stderr = &stderr
+    if err := runCmd.Run(); err != nil {
+        return nil, &driverError{phase: phaseRun, exitCode: 3, stderr: stderr.String(), cause: err}
     }
     forwardWarnings(stderr.String())
     return stdout.Bytes(), nil
@@ -476,10 +490,11 @@ func runDriver(driverDir string) ([]byte, error) {
 ```
 
 注意：
-- 用 `go run`，不要 `go build`+exec。`go run` 自动管理临时编译产物
+- **不要用 `go run`**：`go run` 把编译错误、运行 panic、用户 `os.Exit(1)` 都映射成同一个非零退出码，无法可靠区分退出 2 / 退出 3
 - `cmd.Dir` 指向 driver 子目录即可，因为 driver 不是独立 module，Go 工具链会从该目录向上查找 `go.mod`，自动找到用户 module 根
 - driver 的 stderr 用作 warning / 错误通道，stdout 严格只放 spec 字节
 - 一般继承用户环境（含 `GOFLAGS`、`GOPROXY` 等）
+- 编译产物 `driver.bin` 在 defer 中清理；`--keep-driver` 模式下不删除以便人工调试
 
 ### 5.6 Format & Write
 
@@ -831,11 +846,19 @@ components:
 
 - **目标**：CLI 收到的配置都能反映到最终 spec；高级元数据通过 metadata hook 接入
 - **交付**：
-  - 扩展 driver 模板，按配置渲染 `Info` / `Server` / `Source` / `IncludeTestFiles` / `SecurityScheme`（HTTP basic / bearer / API key / OAuth2 四种标准 flow）/ `Tags` 等可序列化 option
+  - 扩展 driver 模板，按配置渲染 `Info` / `Server` / `Source` / `IncludeTestFiles` / `SecurityScheme`（HTTP basic / bearer / API key / OAuth2 四种标准 flow）等可序列化 option
+  - 渲染 OpenAPI **顶层 tag registry**（`spec.Tags`），而非 operation 级 tag 引用
   - 配置中 `metadataHook` 字段（形如 `pkg.Func`，签名 `func() []openapi.Option`）：driver 模板渲染时把它 import 并展开到 `opts...`
   - entry resolver 支持解析 hook 函数（与 entry 同套机制）
+- **library 能力缺口（必须先补，否则配置无法落地）**：
+  - `info.description`：当前 `openapi.Info(title, version)` 只接受 title/version，需新增 `openapi.InfoDescription(string)` 或扩展为可变参 option
+  - `servers[].description`：当前 `openapi.Server(url)` 仅 url，需新增 `openapi.ServerWithDescription(url, desc)` 或类似
+  - 顶层 `tags` / `externalDocs`：library 当前的 `openapi.Tags(...)` 是 operation 级 option，**不写入 spec.Tags**；需新增 `openapi.Tag(name, opts...)` 类 option 写入顶层 registry，或在 driver 内拿到 `g.Spec()` 后直接补 `spec.Tags = ...` 再序列化
+  - 若选 driver 内直接补字段路线，需明确：library 仍仅生成核心 spec，driver 模板负责把 YAML 配置中的描述类元信息直接写入 `*openapi3.T` 后再 marshal
 - **验收**：
-  - `info: { title: Acme }` → 生成 yaml `info.title == "Acme"`
+  - `info: { title: Acme, description: "..." }` → 生成 yaml 同时含 `info.title` 与 `info.description`
+  - `servers: [{ url, description }]` → spec `servers[0]` 同时含两个字段
+  - `tags: [{ name, description, externalDocs }]` → 生成 yaml 顶层 `tags` 节完整
   - source 配置生效（handler 注释出现在 operation summary 中）
   - `metadataHook` 中 `RegisterFormatter(decimal.Decimal{}, ...)` 能让该类型的字段在 spec 中按指定 schema 输出
   - hook 缺失时不报错，仅基础元数据生效
