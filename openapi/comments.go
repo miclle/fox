@@ -100,14 +100,10 @@ func (d *commentDocs) addTypeDecl(decl *ast.GenDecl) {
 			continue
 		}
 		for _, field := range structType.Fields.List {
-			group := field.Doc
-			if group == nil {
-				group = field.Comment
-			}
-			if group == nil {
+			text := fieldCommentText(field)
+			if text == "" {
 				continue
 			}
-			text := commentText(group)
 			for _, name := range field.Names {
 				if d.fields[typeSpec.Name.Name] == nil {
 					d.fields[typeSpec.Name.Name] = make(map[string]string)
@@ -116,6 +112,20 @@ func (d *commentDocs) addTypeDecl(decl *ast.GenDecl) {
 			}
 		}
 	}
+}
+
+func fieldCommentText(field *ast.Field) string {
+	parts := make([]string, 0, 2)
+	if field.Doc != nil {
+		parts = append(parts, commentText(field.Doc))
+	}
+	if field.Comment != nil {
+		text := commentText(field.Comment)
+		if len(parts) == 0 || parts[len(parts)-1] != text {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n\n")
 }
 
 func (d *commentDocs) funcDoc(runtimeName string) string {
