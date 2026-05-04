@@ -1,7 +1,7 @@
 # Fox OpenAPI — 设计与 CLI 实现交接文档
 
 > 状态：library 已实现 Phase 1+2 作为内部反射载体；CLI 为生产推荐方向，待实现
-> 版本：v0.6（修正 driver module 策略与元数据缺口）
+> 版本：v0.7（澄清 tags 语义边界、补全 metadataHook/autoAdd flag、修正 Content-Type 与类型映射的实现声明、补全 hook 示例 import）
 > 日期：2026-05-04
 > 接收方注意：本文档面向**没有当前会话上下文**的实现者（人或 AI）。所有背景、目标、决策、陷阱、验收标准都写在此文档内，不需要回看会话历史。
 
@@ -89,6 +89,7 @@ package server
 import (
     "reflect"
     openapi "github.com/fox-gonic/fox-openapi"
+    "github.com/getkin/kin-openapi/openapi3"
     "github.com/shopspring/decimal"
 )
 
@@ -153,18 +154,71 @@ $ fox-openapi generate \
 允许把参数固化到 `fox-openapi.yaml`（项目根目录），然后 `fox-openapi generate` 不带参数即可：
 
 ```yaml
-# fox-openapi.yaml
+# fox-openapi.yaml — 完整 schema 示例
+
+# 必填
 entry: github.com/acme/myapp/internal/server.NewEngine
+
+# 输出
 out: api/openapi.yaml
-format: yaml          # yaml | json
+format: yaml                # yaml | json；默认从 out 后缀推断
+
+# 注释提取
 sources:
-  - ./...             # 注释提取路径
+  - ./...
+includeTestFiles: false
+
+# OpenAPI Info
 info:
   title: Acme API
   version: 1.0.0
+  description: |            # 可选
+    Multi-line description.
+
+# OpenAPI servers
 servers:
-  - https://api.acme.com
+  - url: https://api.acme.com
+    description: production # 可选
+  - url: https://staging.api.acme.com
+
+# 全局 tag registry（OpenAPI tags 节）
+# 仅作为 spec 顶层 tags 元信息（描述、外链）；与 operation 上的 tag 引用解耦。
+# operation 自身的 tag 标注通过 metadataHook 中的 openapi.Tags(...) 完成。
+tags:
+  - name: users
+    description: User management endpoints
+  - name: billing
+    description: Billing & invoicing
+    externalDocs:
+      url: https://docs.acme.com/billing
+      description: Billing guide
+
+# 标准 SecurityScheme（HTTP basic / bearer / apiKey / oauth2 四种 flow）
+# 自定义 / 复杂场景请用 metadataHook 调用 openapi.SecurityScheme(...)
+securitySchemes:
+  BearerAuth:
+    type: http
+    scheme: bearer
+    bearerFormat: JWT
+    description: JWT bearer token
+  ApiKeyAuth:
+    type: apiKey
+    in: header
+    name: X-API-Key
+
+# 高级元数据 hook（可选）
+# 详见 §1.3：用于 RegisterFormatter / SetErrorSchema / Operation(Response with Go types)
+metadataHook: github.com/acme/myapp/internal/server.ConfigureOpenAPI
+
+# 模块依赖自动添加（可选；不开启时检测到缺失会退出 1）
+autoAdd: false
 ```
+
+**关于 tags 的语义边界**：
+- 配置文件 `tags` 节 **= OpenAPI 顶层 `tags`**，仅描述 tag 元信息（名称、描述、外链）
+- **operation 级的 `tags` 引用**（"这个接口属于哪些 tag"）必须通过 metadataHook 中 `openapi.Operation("POST", "/users", openapi.Tags("users"))` 表达，因为它需要按路由匹配
+- group 级 tag（一批路由共用一组 tag）通过 metadataHook 中 `openapi.Group("/api/v1", openapi.Tags("v1"))` 表达
+- **首版不在 YAML 里支持 operation/group tag 引用**，避免和 hook 形成两套互相覆盖的入口
 
 CLI 优先读命令行参数，否则读配置文件，否则使用默认值。
 
@@ -217,9 +271,13 @@ exit code: 4
 | `--format` | 由 `--out` 后缀推断 | `yaml` 或 `json` |
 | `--source` | `./...`（可重复） | 传给 library `Source()` 的路径列表 |
 | `--include-test-files` | `false` | 透传 `IncludeTestFiles()` |
+| `--metadata-hook` | （无） | 形如 `module/path/pkg.FuncName`；可选；签名必须为 `func() []openapi.Option`。详见 §1.3 |
+| `--auto-add` | `false` | 用户 `go.mod` 缺少 `fox-openapi` require 时，自动执行 `go get github.com/fox-gonic/fox-openapi@<cliVersion>`。会修改用户 `go.mod` / `go.sum`，需明确开启 |
 | `--workdir` | 当前目录 | 用户项目根目录（含 `go.mod`） |
 | `--keep-driver` | `false` | 保留临时 driver 目录用于排查 |
 | `--verbose` | `false` | 打印执行细节 |
+
+> 解析时机：`--metadata-hook` 仅在 CLI flag 或 config 文件显式指定时才被 entry resolver 加载；不存在时静默跳过，**不做 happy path 自动发现**。
 
 ### 3.4 serve 子命令的额外 flags
 
@@ -537,9 +595,10 @@ OpenAPI 生成只关心：
 
 请求体的 `Content-Type` 推断顺序：
 
-1. handler 元数据显式声明（builder API）
-2. 字段是否带 `form` tag → `application/x-www-form-urlencoded`
-3. 默认 `application/json`
+1. 字段是否带 `form` tag → `application/x-www-form-urlencoded`
+2. 默认 `application/json`
+
+> **TODO（library 尚未实现）**：未来计划新增 builder API（如 `openapi.RequestBody(contentType, body)`）允许 handler 元数据显式声明 Content-Type；当前 §8.1 的 option 列表暂未提供该能力。
 
 ### 6.4 返回类型映射
 
@@ -550,8 +609,8 @@ OpenAPI 生成只关心：
 | `string` | `200: text/plain` |
 | 无返回值 | `200`，无响应体 |
 | `error` 单返回 | 仅默认错误响应 |
-| `render.Render` / `render.Redirect` | 跳过 schema 推断 |
-| `any` / `interface{}` / `map[string]any` | `additionalProperties: true`；记录 warning |
+| `render.Render` / `render.Redirect` | **TODO（library 尚未实现）**：规划中跳过 schema 推断，当前会按普通接口类型处理 |
+| `any` / `interface{}` / `map[string]any` | 输出 `additionalProperties: true`。**TODO**：规划中追加 warning，当前静默处理 |
 
 ---
 
@@ -603,7 +662,7 @@ OpenAPI 生成只关心：
 | `[]T` | `array`，`items: T` |
 | `map[string]T` | `object`，`additionalProperties: T` |
 | 自定义 struct | `$ref: "#/components/schemas/<TypeName>"` |
-| 实现 `json.Marshaler` 但非 struct | `additionalProperties: true` + warning |
+| 实现 `json.Marshaler` 但非 struct | 输出 `additionalProperties: true`。**TODO（library 尚未实现）**：规划中追加 warning，当前静默处理 |
 
 **命名策略**：`pkg.Type` → `pkg_Type`；同名冲突时第一个保留短名，后来者使用包路径全名 + 输出 warning。
 
