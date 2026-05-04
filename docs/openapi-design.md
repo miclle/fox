@@ -1,7 +1,7 @@
 # Fox OpenAPI — 设计与 CLI 实现交接文档
 
 > 状态：library 已实现 Phase 1+2 作为内部反射载体；CLI 为生产推荐方向，待实现
-> 版本：v0.5（library + CLI 合并稿）
+> 版本：v0.6（修正 driver module 策略与元数据缺口）
 > 日期：2026-05-04
 > 接收方注意：本文档面向**没有当前会话上下文**的实现者（人或 AI）。所有背景、目标、决策、陷阱、验收标准都写在此文档内，不需要回看会话历史。
 
@@ -55,10 +55,60 @@ Fox 是基于 Gin 二次封装的 Go Web 框架（module `github.com/fox-gonic/f
 
 **为什么改 CLI**：
 
-1. **零业务侵入**：业务代码不需要 import openapi 包、不需要在 main 中 `openapi.New(...)` / `Mount(...)`
+1. **零业务侵入（基础场景）**：业务代码不需要 import openapi 包、不需要在 main 中 `openapi.New(...)` / `Mount(...)`
 2. **零运行期开销**：spec 在 CI 中生成，不进入业务进程的内存与启动路径
 3. **可纳入版本控制**：`api/openapi.yaml` 作为 PR 的 review 对象，破坏性变更显式可见
 4. **复用现有 library 反射逻辑**：CLI 在 driver 子进程中调用 library，不重写一遍
+
+**"零侵入"的边界（重要）**：
+
+CLI 只能透传 library 中**可序列化的 option**——`Info` / `Server` / `Source` / `IncludeTestFiles` / `Tags` / `SecurityScheme`（基础类型）这些通过 YAML 配置即可表达。而以下 option 涉及 Go 类型、`reflect.Type`、`*openapi3.Schema` 等运行期对象，**无法用配置文件表达**：
+
+| Option | 为什么不能纯 YAML 化 |
+|---|---|
+| `RegisterFormatter(reflect.Type, *openapi3.Schema)` | 需要 Go 类型与 openapi3 schema 对象 |
+| `SetErrorSchema(body any)` | 需要 Go 类型实例 |
+| `Operation(method, path, Response(status, body any, ...))` | response body 是 Go 类型 |
+| 复杂的 `SecurityScheme` 自定义 flow | 嵌套对象较多，YAML 表达冗长 |
+
+**首版策略：双轨制**
+
+1. **基础元数据**走 CLI config（`fox-openapi.yaml`）：`info`、`servers`、`sources`、`securitySchemes`（标准 HTTP / API key / OAuth2 三种）、`tags`
+2. **高级元数据**走"可选的 metadata hook 函数"：用户可在自己代码里写一个**可选**的导出函数，例如 `func ConfigureOpenAPI() []openapi.Option`，在 CLI config 中通过 `metadataHook: github.com/acme/myapp/internal/server.ConfigureOpenAPI` 指向它。CLI driver 检测到该配置后，把 hook 返回的 option 一并 apply
+
+```yaml
+# fox-openapi.yaml
+entry: github.com/acme/myapp/internal/server.NewEngine
+metadataHook: github.com/acme/myapp/internal/server.ConfigureOpenAPI  # 可选
+```
+
+```go
+// 用户代码（与业务路由分离的小文件）
+package server
+
+import (
+    "reflect"
+    openapi "github.com/fox-gonic/fox-openapi"
+    "github.com/shopspring/decimal"
+)
+
+func ConfigureOpenAPI() []openapi.Option {
+    return []openapi.Option{
+        openapi.RegisterFormatter(reflect.TypeOf(decimal.Decimal{}),
+            openapi3.NewStringSchema().WithFormat("decimal")),
+        openapi.SetErrorSchema(MyError{}),
+        openapi.Operation("POST", "/users",
+            openapi.Response(201, &User{}, "Created"),
+        ),
+    }
+}
+```
+
+**评价**：
+
+- 基础场景完全 0 侵入（不用写 hook）
+- 高级场景需要写一个**和路由注册分离**的小函数，但比"在 main 里 `openapi.New(...)`"轻得多——文件可单独存在，且不影响业务进程
+- 比起把这些能力硬塞进 YAML，hook 方案保留了 Go 类型安全与 IDE 补全
 
 **library 兼容性**：library 尚未在生产项目中使用，CLI 化过程中如有 API 调整不需要保证向后兼容。
 
@@ -235,6 +285,7 @@ import (
     "github.com/fox-gonic/fox-openapi"
 
     userentry "{{.EntryImportPath}}"
+    {{if .HookImportPath}}userhook "{{.HookImportPath}}"{{end}}
 )
 
 func main() {
@@ -258,6 +309,9 @@ func main() {
         ),
         {{end}}
     }
+    {{if .HookImportPath}}
+    opts = append(opts, userhook.{{.HookFuncName}}()...)
+    {{end}}
 
     g := openapi.New(engine, opts...)
 
@@ -288,19 +342,40 @@ func main() {
 
 ### 5.2 临时工作区布局
 
-**推荐方案**：driver 放在用户项目下 `<workdir>/.fox-openapi/driver/`，单独一个 `go.mod`，通过 `replace` 指回用户项目：
+**最终方案：driver 是用户 module 内部的一个临时 main 包，不创建独立 module。**
 
 ```
-<workdir>/.fox-openapi/driver/
-├── go.mod        # module fox-openapi-driver; require fox-openapi; replace acme/myapp => ../..
-└── main.go
+<workdir>/                  # 用户项目根（含 go.mod）
+└── .fox-openapi/
+    └── driver/
+        └── main.go         # 由 CLI 渲染生成；package main
 ```
 
-**优点**：用户项目的 go.mod 完全不动；CLI 只需要写 4 个文件；执行后可清理。
+driver 的 import path 解析规则、`internal/` 可见性规则、`replace` 指令、`go.work`、vendor，都自动**继承用户 module**——CLI 不需要复制 / 改写 `go.mod`。
 
-**陷阱**：用户项目本身可能有 `replace` 指令（如 `replace github.com/fox-gonic/fox => ../fox`），driver 的 go.mod 也要复制这些 replace。实现时把用户 `go.mod` 解析后，把所有 `replace` 行原样复制到 driver go.mod，**并把相对路径转成绝对路径**（因为 driver 在 `.fox-openapi/driver/` 下，相对路径 base 不同）。
+执行：
 
-把这些放到 `internal/cli/modfile.go`，用 `golang.org/x/mod/modfile` 解析与重写 go.mod。
+```go
+cmd := exec.Command("go", "run", ".")
+cmd.Dir = filepath.Join(workdir, ".fox-openapi", "driver")
+```
+
+**为什么不做独立 module（之前文档里的方案）**：
+
+1. **Go `internal/` 包规则**：`internal` 包只允许同一 module 内部 import。如果 driver 是独立 module（哪怕用 `replace` 指回用户项目），`import "github.com/acme/myapp/internal/server"` 会被编译器拒绝。这是 happy path 的硬阻断——而 `internal/server.NewEngine` 是非常常见的实战写法。
+2. 不需要复制和重写 `replace` 指令、不需要处理相对路径 rebase、不需要担心 `go.work` 不可见——这些复杂性全部消失。
+3. driver 加上 `// +build ignore` 或文件名带 `_driver`？不需要——`.fox-openapi/` 加进 `.gitignore` 即可，不会被 `go build ./...` 选中（它在隐藏目录下不会被通配命中）；如果用户显式 `go build ./.fox-openapi/...` 也只是把 driver 编译一次，无副作用。
+
+**对用户 module 的唯一要求**：用户 `go.mod` 必须 `require github.com/fox-gonic/fox-openapi`，否则 driver 编不过。
+
+CLI 第一次运行时检查：
+
+- 若 `go list -m github.com/fox-gonic/fox-openapi` 返回非空 → ok
+- 否则提示用户运行 `go get github.com/fox-gonic/fox-openapi@<cliVersion>`，或加 `--auto-add` 让 CLI 自动跑这条命令（修改用户 go.mod / go.sum，需要明确同意）
+
+**Source 路径处理**：driver 渲染时把 `--source` 路径转成相对 `cmd.Dir` 的绝对路径（或保留用户原样并由 driver 内 `os.Chdir` 切回 `workdir`）。推荐**用绝对路径**，避免 chdir 引入隐式状态。
+
+**清理**：成功结束后删除 `.fox-openapi/driver/`；`--keep-driver` 时保留。建议项目级 `.gitignore` 加上 `/.fox-openapi/`（CLI 首次运行可主动 append，需明确提示用户）。
 
 ### 5.3 Config Loader
 
@@ -328,9 +403,9 @@ func main() {
 ### 5.5 Driver 执行
 
 ```go
-func runDriver(workdir, driverDir string) ([]byte, error) {
-    cmd := exec.Command("go", "run", "./"+filepath.Base(driverDir))
-    cmd.Dir = workdir
+func runDriver(driverDir string) ([]byte, error) {
+    cmd := exec.Command("go", "run", ".")
+    cmd.Dir = driverDir // <workdir>/.fox-openapi/driver/
     var stdout, stderr bytes.Buffer
     cmd.Stdout = &stdout
     cmd.Stderr = &stderr
@@ -344,7 +419,7 @@ func runDriver(workdir, driverDir string) ([]byte, error) {
 
 注意：
 - 用 `go run`，不要 `go build`+exec。`go run` 自动管理临时编译产物
-- 必须设置 `cmd.Dir = workdir`，否则解析不了用户项目的 `go.mod`
+- `cmd.Dir` 指向 driver 子目录即可，因为 driver 不是独立 module，Go 工具链会从该目录向上查找 `go.mod`，自动找到用户 module 根
 - driver 的 stderr 用作 warning / 错误通道，stdout 严格只放 spec 字节
 - 一般继承用户环境（含 `GOFLAGS`、`GOPROXY` 等）
 
@@ -369,7 +444,7 @@ openapi/                            # 既有 library module
         ├── config.go               # Config struct + loader
         ├── resolve.go              # Entry resolver（go/packages）
         ├── driver.go               # 模板渲染 + 临时目录管理
-        ├── modfile.go              # go.mod 解析与重写
+        ├── modcheck.go             # 检测用户 go.mod 是否 require fox-openapi
         ├── runner.go               # exec go run + 输出捕获
         ├── writer.go               # 原子写入 + check diff
         ├── templates/
@@ -511,7 +586,7 @@ OpenAPI 生成只关心：
 | `numeric` | 由类型保证；忽略 |
 | `alphanum` | `pattern: "^[a-zA-Z0-9]+$"` |
 | `omitempty` | 不进入 `required` |
-| 其他未知规则 | 输出 warning，写入 `x-fox-binding` 扩展字段 |
+| 其他未知规则 | **TODO（library 尚未实现）**：当前静默忽略；规划中改为输出 warning 并写入 `x-fox-binding` 扩展字段 |
 
 ### 7.3 类型映射
 
@@ -612,7 +687,7 @@ components:
 
 凡是返回 `(T, error)` 的 handler，自动添加 `default` 响应指向 `HTTPError`。
 
-如果用户设置了 `engine.RenderErrorFunc`，生成器无法推断真实 schema，默认仍用 `HTTPError`，并在 spec 顶部加一条 `x-fox-warning`；用户可通过 `openapi.SetErrorSchema(myErrorType)` 覆盖。
+如果用户设置了 `engine.RenderErrorFunc`，生成器无法推断真实 schema。当前 library 默认仍用 `HTTPError` 但**不主动发警告**（**TODO**：规划中改为在 spec 顶部加 `x-fox-warning`）。用户可通过 `openapi.SetErrorSchema(myErrorType)` 覆盖。
 
 ---
 
@@ -623,7 +698,7 @@ components:
 | `github.com/getkin/kin-openapi/openapi3` | ✓ 完整 OpenAPI 3.0/3.1 模型 |
 | `github.com/goccy/go-yaml` | ✓ YAML 序列化 + 配置文件解析 |
 | `golang.org/x/tools/go/packages` | ✓ Entry resolver |
-| `golang.org/x/mod/modfile` | ✓ go.mod 重写 |
+| `golang.org/x/mod/modfile` | ✓ 解析用户 go.mod 检测 fox-openapi require |
 | `github.com/spf13/cobra` 或标准 `flag` | 二选一，建议标准 `flag.NewFlagSet`（无额外依赖） |
 
 ---
@@ -632,6 +707,23 @@ components:
 
 每项独立可验证，按顺序推进。
 
+### TODO 0：准备 CLI 验收 fixture（前置）
+
+- **目标**：让后续 TODO 1 有真实的 happy path 可跑
+- **背景**：当前 `examples/08-openapi/` 是 **library mount 模式**——main 里直接 `openapi.New(engine, ...)` + `openapi.Mount(...)`，业务代码侵入。CLI 验收需要的是无侵入风格，且**没有 `expected.yaml`**
+- **交付**：
+  - 新增 `examples/09-openapi-cli/` 或改造 `examples/08-openapi/`：
+    - 业务代码**不 import** `fox-openapi`
+    - 暴露 `func NewEngine() *fox.Engine`（位于 `internal/server/` 或包级目录均可）
+    - 路由注册与外部依赖解耦（不连 DB）
+    - `main.go` 可保留 `engine.Run`，CLI 不会调用它
+  - 把当前 example 期望产物固化为 `expected.yaml`（手工跑一次 generate 后人工 review 入库）
+  - 该 fixture 自身的 `go.mod` 通过 local `replace` 指向 `openapi/`（与现有 example 一致）
+- **验收**：
+  - `cd examples/09-openapi-cli && go build ./...` 通过（业务代码独立可编译）
+  - `grep -r fox-openapi examples/09-openapi-cli/` 只命中 `go.mod` 与 `fox-openapi.yaml` 之类配置文件，不命中 `.go` 业务代码
+  - `expected.yaml` 入库
+
 ### TODO 1：CLI 骨架 + generate 最小路径
 
 - **目标**：`fox-openapi generate --entry pkg.Func` 跑通最简单 case
@@ -639,10 +731,10 @@ components:
   - `cmd/fox-openapi/main.go` 解析参数
   - `internal/cli/cli.go` 串起 config → resolve → driver → run → write
   - `<workdir>/.fox-openapi/driver/` 创建逻辑
-  - driver 模板 hardcode 最小版本（不支持 Source）
+  - driver 模板 hardcode 最小版本（不支持 Source / hook）
 - **验收**：
-  - `examples/08-openapi/` 上运行能输出非空 yaml
-  - 与 `examples/08-openapi/expected.yaml` 一致
+  - 在 TODO 0 准备好的 fixture 上运行输出非空 yaml
+  - 与 `expected.yaml` 一致（字节级或 YAML 语义级 diff）
   - `--keep-driver` 时目录保留；否则清理
 
 ### TODO 2：Config 文件加载
@@ -657,14 +749,18 @@ components:
 - **交付**：`internal/cli/resolve.go`，使用 `golang.org/x/tools/go/packages`
 - **验收**：单测覆盖合法 entry / 不存在的包 / 不存在的函数 / 函数签名不匹配 / 函数未导出；错误信息能告诉用户具体哪一步失败、期望签名是什么
 
-### TODO 4：Driver 模板与 go.mod 重写
+### TODO 4：Driver 模板与依赖检测
 
-- **目标**：能为任意用户项目生成可编译的 driver，包括有 replace 指令的项目
+- **目标**：能在任意用户 module 内生成可编译的 driver
 - **交付**：
   - `internal/cli/templates/driver.go.tmpl`
-  - `internal/cli/driver.go` 渲染
-  - `internal/cli/modfile.go` 用 `x/mod/modfile` 解析+重写 go.mod，复制 replace 指令并 rebase 路径
-- **验收**：含 `replace` 的 fixture 项目上跑 generate 成功；`--keep-driver` 后手动 `cd .fox-openapi/driver && go build .` 也能成功
+  - `internal/cli/driver.go` 渲染逻辑（写到 `<workdir>/.fox-openapi/driver/main.go`）
+  - `internal/cli/modcheck.go` 用 `x/mod/modfile` 解析 `<workdir>/go.mod`，确认 `github.com/fox-gonic/fox-openapi` 已被 require；缺失时给出明确错误（"run `go get github.com/fox-gonic/fox-openapi`"），`--auto-add` 时自行执行
+- **验收**：
+  - `entry` 指向 `internal/server.NewEngine` 这种 `internal/` 路径的 fixture 上能成功生成（这是关键验收：driver 必须能 import `internal/...`）
+  - 用户 `go.mod` 含 `replace` 指令时无需任何额外处理仍可生成
+  - 用户未 require fox-openapi 时退出 1 并提示
+  - `--keep-driver` 后手动 `cd .fox-openapi/driver && go build .` 也能成功
 
 ### TODO 5：Driver 执行与 stderr/stdout 分离
 
@@ -672,11 +768,18 @@ components:
 - **交付**：`internal/cli/runner.go`
 - **验收**：driver panic 时 CLI 退出 3，stderr 含 panic 栈；entry 返回 error 时 CLI 退出 3，stderr 含 entry error；`WARN:` 行被前缀化打到 CLI 自身 stderr，不污染输出文件
 
-### TODO 6：Source / Info / Server option 透传
+### TODO 6：Option 透传与 metadata hook
 
-- **目标**：CLI 收到的配置都能反映到最终 spec
-- **交付**：扩展 driver 模板，按配置渲染对应 `openapi.Option`
-- **验收**：配置 `info: { title: Acme }` → 生成 yaml `info.title == "Acme"`；source 配置生效（handler 注释出现在 operation summary 中）
+- **目标**：CLI 收到的配置都能反映到最终 spec；高级元数据通过 metadata hook 接入
+- **交付**：
+  - 扩展 driver 模板，按配置渲染 `Info` / `Server` / `Source` / `IncludeTestFiles` / `SecurityScheme`（HTTP basic / bearer / API key / OAuth2 四种标准 flow）/ `Tags` 等可序列化 option
+  - 配置中 `metadataHook` 字段（形如 `pkg.Func`，签名 `func() []openapi.Option`）：driver 模板渲染时把它 import 并展开到 `opts...`
+  - entry resolver 支持解析 hook 函数（与 entry 同套机制）
+- **验收**：
+  - `info: { title: Acme }` → 生成 yaml `info.title == "Acme"`
+  - source 配置生效（handler 注释出现在 operation summary 中）
+  - `metadataHook` 中 `RegisterFormatter(decimal.Decimal{}, ...)` 能让该类型的字段在 spec 中按指定 schema 输出
+  - hook 缺失时不报错，仅基础元数据生效
 
 ### TODO 7：原子写入 + 目录创建
 
@@ -711,9 +814,9 @@ components:
 
 ### TODO 10：端到端测试 + CI
 
-- **目标**：把 `examples/08-openapi/` 接入 GitHub Actions
+- **目标**：把 TODO 0 的 CLI fixture 接入 GitHub Actions
 - **交付**：
-  - `examples/08-openapi/api/openapi.yaml` 入库
+  - fixture 目录下 `api/openapi.yaml` 入库（即 `expected.yaml` 的最终位置）
   - `.github/workflows/openapi.yml`
   - `internal/cli/cli_test.go` 端到端：起子进程跑 CLI，断言产物
 - **验收**：故意改 handler 签名 → PR diff 命中 yaml 变化；CI workflow 在 main baseline 跑 check 通过
@@ -804,16 +907,16 @@ openapi.Mount(router, spec)
 |---|---|---|
 | 用户 entry 函数有副作用（连 DB / 起 goroutine / `os.Exit`） | 非纯函数 entry | 文档警示；考虑加 `--timeout` |
 | 用户项目用 vendor | vendor 下没有 fox-openapi 包 | 提示用户 `go mod vendor` 后重跑，或不用 vendor |
-| 用户项目用 workspace（`go.work`） | driver 临时目录看不到 workspace | 把 `go.work` 复制到 driver 目录或在 driver 目录写 `go.work` 引用 workspace 根 |
+| 用户项目用 workspace（`go.work`） | driver 在用户 module 内，工具链自动识别 workspace | 一般无需特殊处理；若 fox-openapi 也在 workspace 中需保证它被 `use` |
 | 路由路径包含动态片段 | spec 出现意料之外的 path | library 已照实记录，是用户行为预期 |
 | handler 是闭包或方法值 | runtime function name 带 `.func1` / `-fm` 后缀 | library `cleanHandlerName` + `normalizeRuntimeFuncName` 已处理 |
-| 用户 `replace` 指向相对路径 | rebase 到 driver 临时目录后路径错 | TODO 4 必须正确转换为绝对路径 |
 | Windows 路径分隔符 | `filepath.Join` vs `path.Join` 混用 | 一律用 `filepath`；模板里 import path 用 `path` |
-| go.sum 校验失败 | driver go.mod 引入版本 sum 缺失 | driver 临时目录跑 `go mod download`；或复用用户 go.sum |
+| go.sum 校验失败 | 用户 go.sum 缺 fox-openapi entry | 提示用户先 `go mod tidy` 或 CLI 自动跑 `go mod download` |
 | 用户 fox 版本与 CLI 期望版本不一致 | API 不兼容 | driver 编译失败；CLI 提示用户升级 fox / fox-openapi |
 | 大量 stdout 把 buffer 撑爆 | 极大型 API spec | `cmd.Stdout` 接 `*os.File` 而非内存 buffer |
 | handler 返回 `any` | spec 信息缺失 | library 输出 warning 列表；推荐用具体类型 |
 | 循环引用 struct | 栈溢出 | library schema cache 在递归前先放占位符 `$ref` |
+| 用户 `go build ./...` 选中 driver 文件 | driver 本身可编译，无副作用，但出现在 build 列表里看着别扭 | `.fox-openapi/` 加进 `.gitignore`；隐藏目录通配命中概率低 |
 
 ---
 
@@ -831,7 +934,7 @@ openapi.Mount(router, spec)
 
 ## 15. 验收 Checklist（实现完成后逐条勾）
 
-- [ ] `fox-openapi generate` 在 `examples/08-openapi/` 上输出与预期 YAML 一致
+- [ ] `fox-openapi generate` 在 CLI fixture（见 TODO 0）上输出与 `expected.yaml` 一致
 - [ ] `fox-openapi check` 在一致 / 不一致两种状态下退出码正确
 - [ ] `fox-openapi serve` 起服务后 `/openapi.yaml`、`/docs`、`/scalar`、`/redoc` 全部可访问且离线可用
 - [ ] serve watch 模式下改 handler 注释 1 秒内 UI 反映
