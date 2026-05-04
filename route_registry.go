@@ -39,6 +39,10 @@ func (engine *Engine) registerHandlerRoute(method, path string, handlers Handler
 	engine.handlerRoutesMu.Lock()
 	defer engine.handlerRoutesMu.Unlock()
 
+	if engine.handlerRoutesDisabled {
+		return
+	}
+
 	if engine.handlerRoutes == nil {
 		engine.handlerRoutes = make(map[handlerRouteKey]RouteInfo)
 	}
