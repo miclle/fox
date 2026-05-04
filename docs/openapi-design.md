@@ -1,7 +1,7 @@
 # Fox OpenAPI — 设计与 CLI 实现交接文档
 
 > 状态：library 已实现 Phase 1+2 作为内部反射载体；CLI 为生产推荐方向，待实现
-> 版本：v0.8（明确 info/server/tag 描述类字段的 library 缺口、TODO 6 区分顶层 tag registry、driver 改 build+exec 以可靠区分退出码 2/3）
+> 版本：v0.9（统一 go run → go build+exec 表述、§1.3 改顶层 tag registry、§8.1 API 稳定声明与新增 option 对齐、TODO 6 二选一并更新 driver 模板）
 > 日期：2026-05-04
 > 接收方注意：本文档面向**没有当前会话上下文**的实现者（人或 AI）。所有背景、目标、决策、陷阱、验收标准都写在此文档内，不需要回看会话历史。
 
@@ -62,7 +62,7 @@ Fox 是基于 Gin 二次封装的 Go Web 框架（module `github.com/fox-gonic/f
 
 **"零侵入"的边界（重要）**：
 
-CLI 只能透传 library 中**可序列化的 option**——`Info` / `Server` / `Source` / `IncludeTestFiles` / `Tags` / `SecurityScheme`（基础类型）这些通过 YAML 配置即可表达。而以下 option 涉及 Go 类型、`reflect.Type`、`*openapi3.Schema` 等运行期对象，**无法用配置文件表达**：
+CLI 只能透传**可序列化的元数据**——`Info`、`Server`、`Source`、`IncludeTestFiles`、顶层 tag registry、`SecurityScheme`（基础类型）这些通过 YAML 配置即可表达（其中 `info.description` / `servers[].description` / 顶层 `tags` 描述类字段当前 library option 尚未覆盖，详见 §10 TODO 6）。而以下 option 涉及 Go 类型、`reflect.Type`、`*openapi3.Schema` 等运行期对象，**无法用配置文件表达**：
 
 | Option | 为什么不能纯 YAML 化 |
 |---|---|
@@ -118,7 +118,7 @@ func ConfigureOpenAPI() []openapi.Option {
 | 决策点 | 选择 | 拒绝的方案 | 理由 |
 |---|---|---|---|
 | 走静态 AST 分析（类似 swag） vs 复用 library 的运行期反射 | **运行期反射（Hybrid CLI）** | 纯静态分析 | fox 支持动态注册路由、handler dressing、非字面量路径，纯静态分析会大量误判 |
-| 怎么"运行" | **生成临时 driver `main.go`，`go run` 它，捕获 stdout** | 在 CLI 进程内 `import` 用户包 | Go 不支持运行期加载用户代码 |
+| 怎么"运行" | **生成临时 driver `main.go`，先 `go build` 再执行二进制，捕获 stdout** | 在 CLI 进程内 `import` 用户包；或一步 `go run` | Go 不支持运行期加载用户代码；`go run` 无法可靠区分编译失败与运行时崩溃 |
 | Driver 怎么找入口 | 用户在配置或命令行指定一个**返回 `*fox.Engine` 的导出函数**，如 `internal/server.NewEngine` | 自动发现 main 函数 | main 函数往往启动监听、读配置、连数据库；CLI 不希望产生副作用 |
 | 是否要支持 `*DomainEngine` | **暂不支持**，首版只支持单 engine | — | YAGNI，可在第二版加 |
 | Library 的 `New(engine, opts...)` 接口要不要保留 | **保留作为 dev-time 工具**，但 CLI 在新功能上演进 | 删除 library | library 内部仍是反射的实现载体；CLI 是其上层调度器 |
@@ -373,14 +373,21 @@ func main() {
 
     g := openapi.New(engine, opts...)
 
+    // 顶层 metadata 后处理（描述类字段直接打到 *openapi3.T；详见 §10 TODO 6）
+    spec := g.Spec()
+    {{if .InfoDescription}}spec.Info.Description = {{printf "%q" .InfoDescription}}{{end}}
+    {{range .ServerDescriptions}}{{.}}    // spec.Servers[i].Description = "..."
+    {{end}}
+    {{if .TopLevelTags}}spec.Tags = openapi3.Tags{ {{range .TopLevelTags}}{{.}},{{end}} }{{end}}
+
     var (
         out []byte
         err2 error
     )
     {{if eq .Format "json"}}
-    out, err2 = g.JSON()
+    out, err2 = marshalJSON(spec)
     {{else}}
-    out, err2 = g.YAML()
+    out, err2 = marshalYAML(spec)
     {{end}}
     if err2 != nil {
         fmt.Fprintf(os.Stderr, "generate spec: %v\n", err2)
@@ -411,11 +418,18 @@ func main() {
 
 driver 的 import path 解析规则、`internal/` 可见性规则、`replace` 指令、`go.work`、vendor，都自动**继承用户 module**——CLI 不需要复制 / 改写 `go.mod`。
 
-执行：
+执行（伪代码；完整实现见 §5.5）：
 
 ```go
-cmd := exec.Command("go", "run", ".")
-cmd.Dir = filepath.Join(workdir, ".fox-openapi", "driver")
+// 阶段 1：编译
+buildCmd := exec.Command("go", "build", "-o", "driver.bin", ".")
+buildCmd.Dir = filepath.Join(workdir, ".fox-openapi", "driver")
+// build 失败 → 退出码 2
+
+// 阶段 2：执行
+runCmd := exec.Command(filepath.Join(buildCmd.Dir, "driver.bin"))
+runCmd.Dir = buildCmd.Dir
+// 运行失败 / panic → 退出码 3
 ```
 
 **为什么不做独立 module（之前文档里的方案）**：
@@ -518,7 +532,7 @@ openapi/                            # 既有 library module
         ├── resolve.go              # Entry resolver（go/packages）
         ├── driver.go               # 模板渲染 + 临时目录管理
         ├── modcheck.go             # 检测用户 go.mod 是否 require fox-openapi
-        ├── runner.go               # exec go run + 输出捕获
+        ├── runner.go               # go build + exec + 输出捕获
         ├── writer.go               # 原子写入 + check diff
         ├── templates/
         │   └── driver.go.tmpl
@@ -730,7 +744,7 @@ func YAMLHandler(g *Generator) fox.HandlerFunc
 func JSONHandler(g *Generator) fox.HandlerFunc
 ```
 
-**这些 API 已经稳定，CLI 实现期间不要改签名**。如果 CLI 实现过程中发现 library bug，**先在 library 修，CLI 不要绕过**。
+**这些现有 API 不要改签名**。描述类字段（`info.description` / `servers[].description` / 顶层 `tags`）允许**新增** option（如 `InfoDescription` / `ServerWithDescription` / `Tag(...)`），或选择 driver 后处理路线（详见 §10 TODO 6）；两条路任选其一，不要修改既有 `Info` / `Server` 的签名。如果 CLI 实现过程中发现 library bug，**先在 library 修，CLI 不要绕过**。
 
 ### 8.2 注释提取（Source）
 
@@ -850,11 +864,18 @@ components:
   - 渲染 OpenAPI **顶层 tag registry**（`spec.Tags`），而非 operation 级 tag 引用
   - 配置中 `metadataHook` 字段（形如 `pkg.Func`，签名 `func() []openapi.Option`）：driver 模板渲染时把它 import 并展开到 `opts...`
   - entry resolver 支持解析 hook 函数（与 entry 同套机制）
-- **library 能力缺口（必须先补，否则配置无法落地）**：
-  - `info.description`：当前 `openapi.Info(title, version)` 只接受 title/version，需新增 `openapi.InfoDescription(string)` 或扩展为可变参 option
-  - `servers[].description`：当前 `openapi.Server(url)` 仅 url，需新增 `openapi.ServerWithDescription(url, desc)` 或类似
-  - 顶层 `tags` / `externalDocs`：library 当前的 `openapi.Tags(...)` 是 operation 级 option，**不写入 spec.Tags**；需新增 `openapi.Tag(name, opts...)` 类 option 写入顶层 registry，或在 driver 内拿到 `g.Spec()` 后直接补 `spec.Tags = ...` 再序列化
-  - 若选 driver 内直接补字段路线，需明确：library 仍仅生成核心 spec，driver 模板负责把 YAML 配置中的描述类元信息直接写入 `*openapi3.T` 后再 marshal
+- **library 能力缺口（必须先补，否则配置无法落地）— 实施前请二选一并在 PR 中明确**：
+  - **路线 A：新增 library option**
+    - `info.description`：新增 `openapi.InfoDescription(string)`（或将 `Info` 扩展为可变参 option）
+    - `servers[].description`：新增 `openapi.ServerWithDescription(url, desc)`（或类似）
+    - 顶层 `tags` / `externalDocs`：新增 `openapi.Tag(name, opts...)` 写入顶层 `spec.Tags`（注意当前 `openapi.Tags(...)` 是 operation 级，**不动它**，新加一个不同名的 option）
+    - driver 模板按现有 `Info` / `Server` 同样的方式 append 这些新 option
+  - **路线 B：driver 内后处理 `*openapi3.T`**（推荐，无需扩库 API）
+    - library 仅负责生成核心 spec；driver 调用 `spec := g.Spec()` 拿到 `*openapi3.T` 指针
+    - driver 直接写：`spec.Info.Description = ...` / `spec.Servers[i].Description = ...` / `spec.Tags = openapi3.Tags{...}`
+    - 然后用 kin-openapi 自带的 marshaller 序列化（**不要再走 `g.YAML()` / `g.JSON()`**，否则会再跑一遍生成流程）
+    - driver 模板伪代码示意见 §5.1
+  - 两条路二选一即可；首版倾向路线 B（最小化 library 改动，把"描述类元信息"明确归口到 CLI 后处理层）
 - **验收**：
   - `info: { title: Acme, description: "..." }` → 生成 yaml 同时含 `info.title` 与 `info.description`
   - `servers: [{ url, description }]` → spec `servers[0]` 同时含两个字段
