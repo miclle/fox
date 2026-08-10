@@ -60,6 +60,7 @@ func (group *RouterGroup) handleWrapper(handlers ...HandlerFunc) gin.HandlersCha
 						Context: c,
 						engine:  group.engine,
 						Logger:  log,
+						baseCtx: c.Request.Context(),
 						Request: c.Request,
 					}
 					res = call(ctx, h)

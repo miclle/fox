@@ -485,6 +485,42 @@ func TestContext_Next(t *testing.T) {
 	assert.Equal(t, req, ginCtx.Request)
 }
 
+// TestContext_RequestReplacementVisibleToOuterMiddleware reproduces
+// https://github.com/fox-gonic/fox/issues/79: a route-level middleware that
+// replaces c.Request (e.g. c.Request.WithContext(...)) must be visible to the
+// outer (earlier-registered) global middleware reading after c.Next().
+func TestContext_RequestReplacementVisibleToOuterMiddleware(t *testing.T) {
+	type ctxKey struct{}
+
+	router := New()
+	var outerSeen, handlerSeen any
+
+	// Global middleware (registered first, runs first): reads the value injected
+	// by the inner route-level middleware after the chain finishes.
+	router.Use(func(c *Context) {
+		c.Next()
+		outerSeen = c.Request.Context().Value(ctxKey{})
+	})
+
+	// Route-level middleware replaces c.Request, then the real handler reads it.
+	router.GET("/test", func(c *Context) {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxKey{}, "hello"))
+		c.Next()
+	}, func(c *Context) {
+		handlerSeen = c.Request.Context().Value(ctxKey{})
+		c.Status(http.StatusNoContent)
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	router.ServeHTTP(w, req)
+
+	// handler sees: hello
+	assert.Equal(t, "hello", handlerSeen)
+	// outer sees: hello (previously <nil>)
+	assert.Equal(t, "hello", outerSeen)
+}
+
 // Test Copy method
 
 func TestContext_Copy(t *testing.T) {
@@ -565,6 +601,25 @@ func TestContext_Copy_Independence(t *testing.T) {
 	val, exists := copied.Get("original")
 	assert.True(t, exists)
 	assert.Equal(t, "value", val)
+}
+
+// TestContext_Copy_NilRequest guards against a regression where Copy()
+// panicked on a manually constructed Context with a nil Request.
+func TestContext_Copy_NilRequest(t *testing.T) {
+	engine := New()
+	w := httptest.NewRecorder()
+	ginCtx, _ := gin.CreateTestContext(w)
+
+	// ginCtx.Request is nil here; Copy() must not dereference it.
+	ctx := &Context{
+		Context: ginCtx,
+		engine:  engine,
+	}
+
+	assert.NotPanics(t, func() {
+		copied := ctx.Copy()
+		assert.Nil(t, copied.Request)
+	})
 }
 
 // Benchmark tests

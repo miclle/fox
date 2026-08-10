@@ -2,6 +2,7 @@ package fox
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net/http"
 	"time"
@@ -17,7 +18,17 @@ type Context struct {
 
 	engine *Engine
 	Logger logger.Logger
+	// baseCtx is an immutable snapshot of the request context taken when the
+	// fox.Context is created. It backs Done/Err/Value/Deadline so that calls
+	// from asynchronous goroutines stay stable even after the underlying
+	// gin.Context is recycled by the sync.Pool (see PR #30).
+	baseCtx context.Context
 	// Request is the http request copy from gin.Context.
+	// It carries the latest value through the middleware chain: a replacement
+	// made by an inner middleware (e.g. c.Request.WithContext(...)) is visible
+	// to outer middleware after Next() returns. The context.Context interface
+	// methods (Done/Err/Value/Deadline) read baseCtx instead, so Request is
+	// only ever touched synchronously.
 	Request *http.Request
 }
 
@@ -75,33 +86,56 @@ func (c *Context) TraceID() string {
 }
 
 func (c *Context) Done() <-chan struct{} {
-	return c.Request.Context().Done()
+	return c.base().Done()
 }
 
 func (c *Context) Err() error {
-	return c.Request.Context().Err()
+	return c.base().Err()
 }
 
+// Value returns the value associated with key from the request context
+// snapshot taken when this Context was created. It is safe to call from
+// asynchronous goroutines, but it does not observe values injected into the
+// request later in the middleware chain (e.g. c.Request.WithContext(...)).
+// To read live injected values within the synchronous chain, use
+// c.Request.Context().Value(key).
 func (c *Context) Value(key any) any {
-	return c.Request.Context().Value(key)
+	return c.base().Value(key)
 }
 
 func (c *Context) Deadline() (deadline time.Time, ok bool) {
-	return c.Request.Context().Deadline()
+	return c.base().Deadline()
+}
+
+// base returns the immutable snapshot backing the context.Context lifecycle
+// methods. Callers that construct a Context directly (tests) fall back to the
+// live request context.
+func (c *Context) base() context.Context {
+	if c.baseCtx != nil {
+		return c.baseCtx
+	}
+	return c.Request.Context()
 }
 
 func (c *Context) Next() {
 	c.Context.Request = c.Request
 	c.Context.Next()
+	// Sync back the latest request (see the Request field doc).
+	c.Request = c.Context.Request
 }
 
 func (c *Context) Copy() *Context {
 	ginCtx := c.Context.Copy()
 	ginCtx.Request = c.Request
+	var baseCtx context.Context
+	if c.Request != nil {
+		baseCtx = c.Request.Context()
+	}
 	return &Context{
 		Context: ginCtx,
 		engine:  c.engine,
 		Logger:  c.Logger,
+		baseCtx: baseCtx,
 		Request: c.Request,
 	}
 }

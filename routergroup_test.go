@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -86,6 +88,112 @@ func TestRouterGroup_Use(t *testing.T) {
 		assert.Equal(200, w.Code)
 		assert.Equal("context value", w.Body.String())
 	})
+}
+
+// TestRouterGroup_RequestVisibleToOuterMiddleware reproduces issue #79:
+// a middleware that replaces c.Request (e.g. c.Request.WithContext(...))
+// must be visible to outer (earlier-registered) middleware reading after c.Next().
+func TestRouterGroup_RequestVisibleToOuterMiddleware(t *testing.T) {
+	type ctxKey struct{}
+
+	tests := []struct {
+		name     string
+		path     string
+		expected string
+		register func(*fox.Engine)
+	}{
+		{
+			name:     "two middleware layers",
+			path:     "/test",
+			expected: "hello",
+			register: func(e *fox.Engine) {
+				e.Use(func(c *fox.Context) {
+					c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxKey{}, "hello"))
+					c.Next()
+				})
+				e.GET("/test", func(c *fox.Context) string { return "ok" })
+			},
+		},
+		{
+			// The scenario from the issue: a global metrics/logging middleware
+			// registered on the engine reads a value injected by a route-level
+			// (group) middleware.
+			name:     "global middleware reads group middleware value",
+			path:     "/api/test",
+			expected: "from-group",
+			register: func(e *fox.Engine) {
+				api := e.Group("/api", func(c *fox.Context) {
+					c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxKey{}, "from-group"))
+					c.Next()
+				})
+				api.GET("/test", func(c *fox.Context) string { return "ok" })
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := fox.New()
+			var outerSeen any
+
+			// Outer middleware: registered first, runs first, reads after c.Next().
+			router.Use(func(c *fox.Context) {
+				c.Next()
+				outerSeen = c.Request.Context().Value(ctxKey{})
+			})
+			tt.register(router)
+
+			w := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+			router.ServeHTTP(w, req)
+
+			assert.Equal(t, tt.expected, outerSeen)
+		})
+	}
+}
+
+// TestRouterGroup_ContextConcurrentWithRequestReplacement verifies that an
+// asynchronous goroutine reading the context.Context interface (Done/Value)
+// does not race with a synchronous c.Request replacement in the middleware
+// chain (run with -race). All context.Context methods must read the immutable
+// base snapshot, never the synchronously-mutated Request field.
+func TestRouterGroup_ContextConcurrentWithRequestReplacement(t *testing.T) {
+	router := fox.New()
+	type ctxKey struct{}
+
+	router.Use(func(c *fox.Context) {
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			for {
+				select {
+				case <-c.Done(): // reads the immutable base snapshot
+					return
+				case <-stop:
+					return
+				default:
+					_ = c.Value(ctxKey{}) // reads the same immutable snapshot
+					time.Sleep(time.Millisecond)
+				}
+			}
+		})
+		c.Next()
+		close(stop)
+		wg.Wait()
+	})
+	router.Use(func(c *fox.Context) {
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxKey{}, "hello"))
+		c.Next()
+	})
+	router.GET("/test", func(c *fox.Context) string {
+		return "ok"
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 // TestRouterGroup_PresetLogger tests handler with preset logger in context
