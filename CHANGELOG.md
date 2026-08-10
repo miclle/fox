@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-10
+
+### Fixed
+- Propagated `Context.Request` replacements through the middleware chain, so
+  outer middleware can observe request context values injected by inner
+  middleware after `Next()` returns.
+- Kept the `context.Context` methods backed by an immutable request-context
+  snapshot while synchronously carrying the latest request through the chain,
+  avoiding races between asynchronous context reads and request replacement.
+
+### Changed
+- Updated validator and indirect networking dependencies.
+- Updated GitHub Actions dependencies and pinned CI to Go 1.25.12.
+
 ## [0.1.1] - 2026-05-07
 
 ### Added
@@ -138,7 +152,7 @@ with a migration note), test coverage backfill across `examples/` and
 ### Core Dependencies
 - github.com/gin-gonic/gin v1.12.0
 - github.com/gin-contrib/cors v1.7.7
-- github.com/go-playground/validator/v10 v10.30.1
+- github.com/go-playground/validator/v10 v10.30.3
 - github.com/json-iterator/go v1.1.12
 - github.com/mitchellh/mapstructure v1.5.0
 - gopkg.in/natefinch/lumberjack.v2 v2.2.1
@@ -146,10 +160,10 @@ with a migration note), test coverage backfill across `examples/` and
 - github.com/stretchr/testify v1.11.1
 
 ### Indirect Dependencies
-- golang.org/x/crypto v0.49.0
-- golang.org/x/net v0.52.0
-- golang.org/x/sys v0.42.0
-- golang.org/x/text v0.35.0
+- golang.org/x/crypto v0.52.0
+- golang.org/x/net v0.55.0
+- golang.org/x/sys v0.45.0
+- golang.org/x/text v0.37.0
 - google.golang.org/protobuf v1.36.11
 
 ## Development
@@ -195,7 +209,8 @@ See [LICENSE](LICENSE) file for details.
 
 For more information, visit the [GitHub repository](https://github.com/fox-gonic/fox).
 
-[Unreleased]: https://github.com/fox-gonic/fox/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/fox-gonic/fox/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/fox-gonic/fox/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/fox-gonic/fox/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/fox-gonic/fox/compare/v0.0.10...v0.1.0
 [0.0.10]: https://github.com/fox-gonic/fox/compare/v0.0.9...v0.0.10
